@@ -2,6 +2,9 @@
   "name": "edimart-api",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "prisma generate && nest build",
     "start": "node dist/main.js",

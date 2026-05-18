@@ -1,3 +1,10 @@
+import { webcrypto } from "node:crypto";
+
+// Node 18 on some hosts lacks global crypto; @nestjs/schedule needs randomUUID.
+if (!globalThis.crypto) {
+  globalThis.crypto = webcrypto as Crypto;
+}
+
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
 import cookieParser from "cookie-parser";
