@@ -34,7 +34,17 @@ Still on **EdiMartApi** → **Variables**, add:
 
 After saving variables, trigger **Redeploy** on EdiMartApi.
 
-### 4. Seed (once)
+### 4. Database sync on Railway
+
+Deploy uses **`prisma db push`** on Railway (not migrate history), so a failed `20250516000000_init` migration will not block startup.
+
+If the database is still broken from an earlier attempt:
+
+1. EdiMartApi → **Variables** → add `RAILWAY_RESET_DB` = `1`
+2. **Redeploy** once (wipes `public` schema and recreates tables)
+3. **Remove** `RAILWAY_RESET_DB` and redeploy again
+
+### 5. Seed (once)
 
 Railway shell on **EdiMartApi**:
 
