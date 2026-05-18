@@ -60,9 +60,10 @@ const bootstrap = async () => {
     credentials: true,
   });
   const port = Number(process.env.PORT ?? process.env.API_PORT ?? 4000);
-  await app.listen(port, "0.0.0.0");
+  const host = process.env.HOST ?? "0.0.0.0";
+  await app.listen(port, host);
   // eslint-disable-next-line no-console
-  console.log(`API listening on http://127.0.0.1:${port}`);
+  console.log(`API listening on http://${host}:${port} (public URL uses Railway PORT=${port})`);
 };
 
 bootstrap();

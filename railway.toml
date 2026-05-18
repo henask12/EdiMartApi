@@ -7,5 +7,7 @@ builder = "nixpacks"
 
 [deploy]
 startCommand = "node scripts/railway-start.js"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 5

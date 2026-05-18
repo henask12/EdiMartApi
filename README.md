@@ -30,11 +30,20 @@ Still on **EdiMartApi** → **Variables**, add:
 | `PUBLIC_API_URL` | This API's public URL, e.g. `https://edimartapi-production.up.railway.app` |
 | `UPLOAD_DIR` | `./uploads` |
 
-### 3. Redeploy
+### 3. Public URL (required)
+
+On **EdiMartApi** → **Settings** → **Networking**:
+
+- Enable **Public networking**
+- Click **Generate domain** (e.g. `edimartapi-production.up.railway.app`)
+
+Without this, the deploy logs may show “API listening” but the browser gets **Application failed to respond**.
+
+### 4. Redeploy
 
 After saving variables, trigger **Redeploy** on EdiMartApi.
 
-### 4. Database sync on Railway
+### 5. Database sync on Railway
 
 Deploy uses **`prisma db push`** on Railway (not migrate history), so a failed `20250516000000_init` migration will not block startup.
 
@@ -44,7 +53,7 @@ If the database is still broken from an earlier attempt:
 2. **Redeploy** once (wipes `public` schema and recreates tables)
 3. **Remove** `RAILWAY_RESET_DB` and redeploy again
 
-### 5. Seed (once)
+### 6. Seed (once)
 
 Railway shell on **EdiMartApi**:
 

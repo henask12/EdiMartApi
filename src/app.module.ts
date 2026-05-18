@@ -15,10 +15,12 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { UploadsModule } from "./uploads/uploads.module";
 import { LocationsModule } from "./locations/locations.module";
 import { HealthModule } from "./health/health.module";
+import { AppController } from "./app.controller";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 
 @Module({
+  controllers: [AppController],
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
