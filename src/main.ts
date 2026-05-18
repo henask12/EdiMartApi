@@ -5,7 +5,22 @@ import { join } from "path";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
 
+const requiredEnv = ["DATABASE_URL", "JWT_SECRET"] as const;
+
+const assertRequiredEnv = () => {
+  const missing = requiredEnv.filter((key) => !process.env[key]?.trim());
+  if (missing.length > 0) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `Missing required environment variable(s): ${missing.join(", ")}. ` +
+        "Add them in Railway → EdiMartApi service → Variables, then redeploy.",
+    );
+    process.exit(1);
+  }
+};
+
 const bootstrap = async () => {
+  assertRequiredEnv();
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.use(cookieParser());
   app.useGlobalPipes(
