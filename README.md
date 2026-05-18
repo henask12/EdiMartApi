@@ -10,9 +10,11 @@ In **Render** → **EdiMartApi** → **Settings**:
 |---------|--------|
 | **Root Directory** | *(leave empty — repo root)* **NOT `src`** |
 | **Build Command** | `npm install --include=dev && npm run build` |
-| **Start Command** | `node scripts/render-start.js` |
+| **Start Command** | `npm start` or `node scripts/render-start.js` |
 
-If Root Directory is `src`, deploy fails with `Cannot find module .../src/dist/main.js`.
+If **Root Directory** is `src`, fix it: clear the field, save, redeploy. The start script can recover, but build must run from repo root.
+
+**Important:** Do not use `yarn` unless your repo has `yarn.lock`. This project uses **npm** (`package-lock.json`). On Render set **Node** runtime and the build command above — or disable auto `yarn start`.
 
 **Environment variables:** `DATABASE_URL`, `JWT_SECRET`, `WEB_ORIGIN`, `PUBLIC_API_URL`, `SETUP_SECRET`, `UPLOAD_DIR=./uploads`
 

@@ -2,16 +2,44 @@ const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-const run = (cmd) => execSync(cmd, { stdio: "inherit" });
+/** Repo root (parent of /scripts) — works even if Render cwd is /src */
+const repoRoot = path.resolve(__dirname, "..");
 
-const distMain = path.join(process.cwd(), "dist", "main.js");
-if (!fs.existsSync(distMain)) {
-  console.error(
-    `Missing ${distMain}. Set Render Build Command to: npm install --include=dev && npm run build`,
-  );
-  console.error("Root Directory must be the repo root (leave blank), not src.");
+const run = (cmd) => {
+  execSync(cmd, { stdio: "inherit", cwd: repoRoot, env: process.env });
+};
+
+const findDistMain = () => {
+  const candidates = [
+    path.join(repoRoot, "dist", "main.js"),
+    path.join(process.cwd(), "dist", "main.js"),
+    path.join(process.cwd(), "..", "dist", "main.js"),
+  ];
+  return candidates.find((p) => fs.existsSync(p)) ?? null;
+};
+
+let distMain = findDistMain();
+
+if (!distMain) {
+  console.log("dist/main.js not found — running build in repo root...");
+  try {
+    run("npm run build");
+  } catch (err) {
+    console.error("Build failed:", err.message ?? err);
+    console.error(
+      "On Render set: Root Directory = (empty), Build Command = npm install --include=dev && npm run build",
+    );
+    process.exit(1);
+  }
+  distMain = findDistMain();
+}
+
+if (!distMain) {
+  console.error(`Build finished but dist/main.js is still missing under ${repoRoot}`);
   process.exit(1);
 }
+
+console.log(`Using ${distMain}`);
 
 const resolveDatabaseUrl = () => {
   const url =
@@ -42,4 +70,4 @@ try {
 }
 
 console.log("Starting API...");
-run("node dist/main.js");
+execSync(`node "${distMain}"`, { stdio: "inherit", cwd: repoRoot, env: process.env });
