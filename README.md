@@ -2,7 +2,25 @@
 
 NestJS + Prisma API for Edi's Collection mart.
 
-## Railway setup (required)
+## Render setup (required)
+
+In **Render** → **EdiMartApi** → **Settings**:
+
+| Setting | Value |
+|---------|--------|
+| **Root Directory** | *(leave empty — repo root)* **NOT `src`** |
+| **Build Command** | `npm install --include=dev && npm run build` |
+| **Start Command** | `node scripts/render-start.js` |
+
+If Root Directory is `src`, deploy fails with `Cannot find module .../src/dist/main.js`.
+
+**Environment variables:** `DATABASE_URL`, `JWT_SECRET`, `WEB_ORIGIN`, `PUBLIC_API_URL`, `SETUP_SECRET`, `UPLOAD_DIR=./uploads`
+
+Or use the included `render.yaml` blueprint when creating the service.
+
+---
+
+## Railway setup (optional)
 
 The API **will not start** until these variables exist on the **EdiMartApi** service (not only on Postgres).
 

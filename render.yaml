@@ -1,0 +1,23 @@
+# Render Blueprint — EdiMart API
+# Dashboard override: Root Directory must be empty (repo root), NOT "src".
+
+services:
+  - type: web
+    name: edimart-api
+    runtime: node
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: node scripts/render-start.js
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: WEB_ORIGIN
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SETUP_SECRET
+        generateValue: true
+      - key: PUBLIC_API_URL
+        sync: false
+      - key: UPLOAD_DIR
+        value: ./uploads

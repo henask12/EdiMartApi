@@ -7,7 +7,9 @@
   },
   "scripts": {
     "build": "prisma generate && nest build",
-    "start": "node dist/main.js",
+    "render:build": "prisma generate && nest build",
+    "start": "node scripts/render-start.js",
+    "start:node": "node dist/main.js",
     "start:prod": "prisma migrate deploy && node dist/main.js",
     "start:dev": "nest start --watch",
     "postinstall": "prisma generate",
@@ -34,10 +36,11 @@
     "reflect-metadata": "^0.2.2",
     "resend": "^4.1.2",
     "rxjs": "^7.8.1",
-    "prisma": "^6.3.1"
+    "prisma": "^6.3.1",
+    "@nestjs/cli": "^11.0.2",
+    "typescript": "^5.7.3"
   },
   "devDependencies": {
-    "@nestjs/cli": "^11.0.2",
     "@nestjs/schematics": "^11.0.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.8",
@@ -45,8 +48,7 @@
     "@types/multer": "^1.4.12",
     "@types/node": "^22.10.7",
     "@types/passport-jwt": "^4.0.1",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "tsx": "^4.19.2"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
