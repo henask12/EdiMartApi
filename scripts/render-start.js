@@ -33,7 +33,9 @@ const run = (cmd) => {
 const findDistMain = () => {
   const candidates = [
     path.join(repoRoot, "dist", "main.js"),
+    path.join(repoRoot, "dist", "src", "main.js"),
     path.join(process.cwd(), "dist", "main.js"),
+    path.join(process.cwd(), "dist", "src", "main.js"),
   ];
   return candidates.find((p) => fs.existsSync(p)) ?? null;
 };
@@ -57,11 +59,15 @@ if (!distMain) {
 }
 
 if (!distMain) {
-  console.error(`Build completed but dist/main.js not found. Repo root: ${repoRoot}`);
+  console.error(`Build completed but no runnable main.js was found. Repo root: ${repoRoot}`);
   console.error("Listing repo root:", fs.readdirSync(repoRoot).join(", "));
   const distDir = path.join(repoRoot, "dist");
   if (fs.existsSync(distDir)) {
     console.error("dist/ contents:", fs.readdirSync(distDir).join(", "));
+    const distSrcDir = path.join(distDir, "src");
+    if (fs.existsSync(distSrcDir)) {
+      console.error("dist/src contents:", fs.readdirSync(distSrcDir).join(", "));
+    }
   }
   process.exit(1);
 }
