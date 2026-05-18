@@ -53,13 +53,39 @@ If the database is still broken from an earlier attempt:
 2. **Redeploy** once (wipes `public` schema and recreates tables)
 3. **Remove** `RAILWAY_RESET_DB` and redeploy again
 
-### 6. Seed (once)
+### 6. Seed (once) — no shell required (Render free tier)
 
-Railway shell on **EdiMartApi**:
+**Option A — HTTP (easiest on Render free tier)**
+
+1. On Render → **EdiMartApi** → **Environment**, add:
+   - `SETUP_SECRET` = a long random string (e.g. same style as `JWT_SECRET`)
+2. Redeploy, then run (PowerShell):
+
+```powershell
+$secret = "YOUR_SETUP_SECRET"
+Invoke-RestMethod -Method POST `
+  -Uri "https://edimartapi-1.onrender.com/setup/seed" `
+  -Headers @{ "X-Setup-Key" = $secret }
+```
+
+Or use curl:
 
 ```bash
+curl -X POST https://edimartapi-1.onrender.com/setup/seed \
+  -H "X-Setup-Key: YOUR_SETUP_SECRET"
+```
+
+**Option B — From your PC** (Render → Postgres → External connection string):
+
+```bash
+cd EdiMartApi
+set DATABASE_URL=postgresql://...
 npm run db:seed
 ```
+
+**Option C — Auto on empty DB:** set `AUTO_SEED=1` on Render and redeploy.
+
+Check status: `GET https://edimartapi-1.onrender.com/setup/status`
 
 Demo login: `owner@edisims.local` / `Owner123!`
 

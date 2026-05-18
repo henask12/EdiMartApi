@@ -15,6 +15,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { UploadsModule } from "./uploads/uploads.module";
 import { LocationsModule } from "./locations/locations.module";
 import { HealthModule } from "./health/health.module";
+import { SetupModule } from "./setup/setup.module";
 import { AppController } from "./app.controller";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
@@ -40,6 +41,7 @@ import { RolesGuard } from "./common/guards/roles.guard";
     ReportingModule,
     NotificationsModule,
     HealthModule,
+    SetupModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
