@@ -5,10 +5,25 @@ import { join } from "path";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
 
-const requiredEnv = ["DATABASE_URL", "JWT_SECRET"] as const;
+const resolveDatabaseUrl = () => {
+  const url =
+    process.env.DATABASE_URL?.trim() ||
+    process.env.DATABASE_PRIVATE_URL?.trim() ||
+    process.env.POSTGRES_URL?.trim();
+  if (url && !process.env.DATABASE_URL) {
+    process.env.DATABASE_URL = url;
+  }
+  return url;
+};
 
 const assertRequiredEnv = () => {
-  const missing = requiredEnv.filter((key) => !process.env[key]?.trim());
+  const missing: string[] = [];
+  if (!resolveDatabaseUrl()) {
+    missing.push("DATABASE_URL");
+  }
+  if (!process.env.JWT_SECRET?.trim()) {
+    missing.push("JWT_SECRET");
+  }
   if (missing.length > 0) {
     // eslint-disable-next-line no-console
     console.error(

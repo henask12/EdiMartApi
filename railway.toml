@@ -1,13 +1,11 @@
 # Railway deploy config for EdiMartApi
-# Required variables (set in Railway UI — see README.md):
-#   DATABASE_URL  — reference from Postgres service
-#   JWT_SECRET    — long random string (you create this)
+# Set on EdiMartApi service Variables (see README.md):
+#   DATABASE_URL (reference from Postgres) + JWT_SECRET
 
 [build]
 builder = "nixpacks"
-buildCommand = "npm install && npm run build"
 
 [deploy]
-startCommand = "npx prisma migrate deploy && node dist/main.js"
+startCommand = "node scripts/railway-start.js"
 restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 10
+restartPolicyMaxRetries = 5

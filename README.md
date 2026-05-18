@@ -12,9 +12,11 @@ The API **will not start** until these variables exist on the **EdiMartApi** ser
 2. Click the **EdiMartApi** service (your GitHub deploy).
 3. Go to **Variables**.
 4. Click **+ New Variable** → **Add variable reference** (or **Connect** / reference from Postgres).
-5. Select your **Postgres** service and add:
-   - `DATABASE_URL` → `${{Postgres.DATABASE_URL}}`  
-     (or `DATABASE_PRIVATE_URL` if both services are in the same project — preferred for internal traffic)
+5. Select your **Postgres** service and add **one** of:
+   - `DATABASE_URL` → `${{Postgres.DATABASE_URL}}` (recommended)
+   - or `DATABASE_PRIVATE_URL` → `${{Postgres.DATABASE_PRIVATE_URL}}` (same project, private network)
+
+   The API accepts either name.
 
 ### 2. Add JWT secret (manual)
 
