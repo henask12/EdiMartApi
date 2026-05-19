@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { Prisma } from ".prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { LocationsService } from "../locations/locations.service";
 import { AuditService } from "../audit/audit.service";
@@ -182,7 +182,7 @@ export class CatalogService {
       sku: p.sku ?? "",
       name: p.name,
       type: p.productType?.name ?? "",
-      category: p.category.name,
+      category: p.category.name,  
       onHand: p.onHand,
       available: p.available,
       status: p.stockStatus,

@@ -5,7 +5,7 @@ import {
   MovementType,
   type Product,
 } from "@prisma/client";
-import { DEFAULT_ROLE_PERMISSIONS } from "../src/permissions/role-defaults";
+import { DEFAULT_ROLE_PERMISSIONS } from "../src/permissions";
 import * as bcrypt from "bcryptjs";
 import { CATALOG_CATEGORIES, CATALOG_PRODUCTS } from "./catalog-seed-data";
 
