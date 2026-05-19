@@ -24,10 +24,72 @@ const findRepoRoot = () => {
 };
 
 const repoRoot = findRepoRoot();
+const ROLE_STRING_MIGRATION = "20250520120000_role_name_string";
 
 const run = (cmd) => {
   console.log(`> (${repoRoot}) ${cmd}`);
   execSync(cmd, { stdio: "inherit", cwd: repoRoot, env: process.env });
+};
+
+const runCapture = (cmd) => {
+  try {
+    execSync(cmd, { cwd: repoRoot, env: process.env, encoding: "utf8" });
+    return { ok: true, output: "" };
+  } catch (err) {
+    const output = [err.message, err.stdout, err.stderr].filter(Boolean).join("\n");
+    return { ok: false, output };
+  }
+};
+
+const listMigrations = () => {
+  const dir = path.join(repoRoot, "prisma", "migrations");
+  return fs
+    .readdirSync(dir)
+    .filter((name) => {
+      const full = path.join(dir, name);
+      return fs.statSync(full).isDirectory() && name !== "migration_lock.toml";
+    })
+    .sort();
+};
+
+/** Mark migrations as applied when the DB was created with db push (no _prisma_migrations history). */
+const baselineExistingSchema = () => {
+  const migrations = listMigrations();
+  for (const name of migrations) {
+    if (name === ROLE_STRING_MIGRATION) {
+      continue;
+    }
+    console.log(`Marking migration as applied: ${name}`);
+    const result = runCapture(`npx prisma migrate resolve --applied "${name}"`);
+    if (!result.ok && !result.output.includes("already recorded")) {
+      console.warn(`Could not resolve ${name}:`, result.output);
+    }
+  }
+};
+
+const applyMigrations = () => {
+  console.log("Applying database migrations (prisma migrate deploy)...");
+  const first = runCapture("npx prisma migrate deploy");
+  if (first.ok) {
+    return;
+  }
+
+  const needsBaseline =
+    first.output.includes("P3005") ||
+    first.output.includes("database schema is not empty") ||
+    first.output.includes("schema is not empty");
+
+  if (needsBaseline) {
+    console.log(
+      "Database has tables but no migration history (common after db push). Baselining, then deploying…",
+    );
+    baselineExistingSchema();
+    run("npx prisma migrate deploy");
+    return;
+  }
+
+  console.error("prisma migrate deploy failed:\n", first.output);
+  process.exit(1);
 };
 
 const findDistMain = () => {
@@ -95,10 +157,9 @@ if (!process.env.JWT_SECRET?.trim()) {
 }
 
 try {
-  console.log("Syncing database schema (prisma db push)...");
-  run("npx prisma db push --skip-generate");
+  applyMigrations();
 } catch (err) {
-  console.error("prisma db push failed:", err.message ?? err);
+  console.error("Database migration failed:", err.message ?? err);
   process.exit(1);
 }
 

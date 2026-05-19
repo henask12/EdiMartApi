@@ -24,6 +24,12 @@ Open **Settings** and set exactly:
 - `SETUP_SECRET` — for one-time `POST /setup/seed`
 - `UPLOAD_DIR` — `./uploads`
 
+## Database
+
+Startup runs **`prisma migrate deploy`** (not `db push`). Migrations preserve existing data when changing `Role.name` from enum to text.
+
+If you previously used `db push` only, the first deploy after this change will **baseline** older migrations automatically, then apply `20250520120000_role_name_string`.
+
 ## After deploy
 
 1. https://edimartapi-1.onrender.com/health
