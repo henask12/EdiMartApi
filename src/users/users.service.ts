@@ -73,6 +73,14 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException("User not found");
     }
+    if (user.role.name === RoleName.OWNER) {
+      if (data.isActive === false) {
+        throw new BadRequestException("Owner accounts cannot be deactivated");
+      }
+      if (data.role && data.role !== RoleName.OWNER) {
+        throw new BadRequestException("Owner role cannot be changed");
+      }
+    }
     let roleId = user.roleId;
     if (data.role) {
       const role = await this.prisma.role.findUnique({ where: { name: data.role } });

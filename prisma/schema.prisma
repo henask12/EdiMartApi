@@ -14,6 +14,29 @@ enum RoleName {
   ONLINE_MANAGER
 }
 
+enum PermissionKey {
+  PRODUCTS_VIEW
+  PRODUCTS_CREATE
+  PRODUCTS_EDIT
+  PRODUCTS_DEACTIVATE
+  PRODUCTS_SELL
+  PRODUCTS_RESERVE
+  PRODUCTS_RESTOCK
+  PRODUCTS_EXPORT
+  CATEGORIES_MANAGE
+  PRODUCT_TYPES_MANAGE
+  STOCK_RECEIVE
+  STOCK_HISTORY_VIEW
+  SALES_CREATE
+  SALES_VIEW
+  SALES_EXPORT
+  RESERVATIONS_MANAGE
+  USERS_MANAGE
+  ROLES_MANAGE
+  SETTINGS_EMAILS
+  REPORTING_VIEW
+}
+
 enum ReservationStatus {
   RESERVED
   COMPLETED
@@ -39,10 +62,20 @@ enum NotificationType {
 }
 
 model Role {
-  id        String   @id @default(cuid())
-  name      RoleName @unique
-  users     User[]
-  createdAt DateTime @default(now())
+  id          String           @id @default(cuid())
+  name        RoleName         @unique
+  isProtected Boolean          @default(false)
+  users       User[]
+  permissions RolePermission[]
+  createdAt   DateTime         @default(now())
+}
+
+model RolePermission {
+  roleId     String
+  role       Role          @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission PermissionKey
+
+  @@id([roleId, permission])
 }
 
 model User {

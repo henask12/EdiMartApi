@@ -1,0 +1,37 @@
+-- CreateEnum
+CREATE TYPE "PermissionKey" AS ENUM (
+  'PRODUCTS_VIEW',
+  'PRODUCTS_CREATE',
+  'PRODUCTS_EDIT',
+  'PRODUCTS_DEACTIVATE',
+  'PRODUCTS_SELL',
+  'PRODUCTS_RESERVE',
+  'PRODUCTS_RESTOCK',
+  'PRODUCTS_EXPORT',
+  'CATEGORIES_MANAGE',
+  'PRODUCT_TYPES_MANAGE',
+  'STOCK_RECEIVE',
+  'STOCK_HISTORY_VIEW',
+  'SALES_CREATE',
+  'SALES_VIEW',
+  'SALES_EXPORT',
+  'RESERVATIONS_MANAGE',
+  'USERS_MANAGE',
+  'ROLES_MANAGE',
+  'SETTINGS_EMAILS',
+  'REPORTING_VIEW'
+);
+
+-- AlterTable
+ALTER TABLE "Role" ADD COLUMN "isProtected" BOOLEAN NOT NULL DEFAULT false;
+
+-- CreateTable
+CREATE TABLE "RolePermission" (
+    "roleId" TEXT NOT NULL,
+    "permission" "PermissionKey" NOT NULL,
+
+    CONSTRAINT "RolePermission_pkey" PRIMARY KEY ("roleId","permission")
+);
+
+-- AddForeignKey
+ALTER TABLE "RolePermission" ADD CONSTRAINT "RolePermission_roleId_fkey" FOREIGN KEY ("roleId") REFERENCES "Role"("id") ON DELETE CASCADE ON UPDATE CASCADE;

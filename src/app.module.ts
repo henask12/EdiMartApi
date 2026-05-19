@@ -17,10 +17,11 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { UploadsModule } from "./uploads/uploads.module";
 import { LocationsModule } from "./locations/locations.module";
 import { HealthModule } from "./health/health.module";
-import { SetupModule } from "./setup/setup.module";
 import { AppController } from "./app.controller";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
+import { PermissionsGuard } from "./common/guards/permissions.guard";
+import { PermissionsModule } from "./permissions/permissions.module";
 
 @Module({
   controllers: [AppController],
@@ -30,6 +31,7 @@ import { RolesGuard } from "./common/guards/roles.guard";
       envFilePath: [".env"],
     }),
     PrismaModule,
+    PermissionsModule,
     AuditModule,
     UsersModule,
     AuthModule,
@@ -45,11 +47,11 @@ import { RolesGuard } from "./common/guards/roles.guard";
     ReportingModule,
     NotificationsModule,
     HealthModule,
-    SetupModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
 export class AppModule {}

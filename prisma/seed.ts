@@ -5,6 +5,7 @@ import {
   MovementType,
   type Product,
 } from "@prisma/client";
+import { DEFAULT_ROLE_PERMISSIONS } from "../src/permissions/role-defaults";
 import * as bcrypt from "bcryptjs";
 import { CATALOG_CATEGORIES, CATALOG_PRODUCTS } from "./catalog-seed-data";
 
@@ -31,13 +32,26 @@ const main = async () => {
       const name = RoleName[key];
       return prisma.role.upsert({
         where: { name },
-        update: {},
-        create: { name },
+        update: { isProtected: name === RoleName.OWNER },
+        create: { name, isProtected: name === RoleName.OWNER },
       });
     }),
   );
 
   const roleByName = (n: RoleName) => roles.find((r) => r.name === n)!;
+
+  for (const role of roles) {
+    const defaults = DEFAULT_ROLE_PERMISSIONS[role.name];
+    for (const permission of defaults) {
+      await prisma.rolePermission.upsert({
+        where: {
+          roleId_permission: { roleId: role.id, permission },
+        },
+        update: {},
+        create: { roleId: role.id, permission },
+      });
+    }
+  }
 
   const defaultLoc = await prisma.location.upsert({
     where: { code: "DEFAULT_STORE" },

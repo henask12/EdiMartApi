@@ -9,9 +9,9 @@ import {
   Req,
   Res,
 } from "@nestjs/common";
-import { RoleName } from "@prisma/client";
+import { PermissionKey } from "@prisma/client";
 import type { Response } from "express";
-import { Roles } from "../common/decorators/roles.decorator";
+import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { parseExportFormat, sendExport } from "../export/export-response.util";
 import { CatalogService } from "./catalog.service";
 import { CreateProductDto, UpdateProductDto } from "./dto/catalog.dto";
@@ -64,13 +64,13 @@ export class CatalogController {
     return this.catalog.getProduct(id);
   }
 
-  @Roles(RoleName.OWNER, RoleName.STORE_STAFF, RoleName.CASHIER)
+  @RequirePermissions(PermissionKey.PRODUCTS_CREATE)
   @Post()
   createProduct(@Req() req: Authed, @Body() body: CreateProductDto) {
     return this.catalog.createProduct(req.user.userId, body);
   }
 
-  @Roles(RoleName.OWNER, RoleName.STORE_STAFF, RoleName.CASHIER)
+  @RequirePermissions(PermissionKey.PRODUCTS_EDIT)
   @Patch(":id")
   updateProduct(
     @Req() req: Authed,

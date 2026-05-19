@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Req } from "@nestjs/common";
-import { RoleName } from "@prisma/client";
+import { PermissionKey, RoleName } from "@prisma/client";
+import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString, MinLength } from "class-validator";
-import { Roles } from "../common/decorators/roles.decorator";
 import { UsersService } from "./users.service";
 
 class CreateUserDto {
@@ -43,7 +43,7 @@ class ResetPasswordDto {
 type Authed = { user: { userId: string } };
 
 @Controller("users")
-@Roles(RoleName.OWNER)
+@RequirePermissions(PermissionKey.USERS_MANAGE)
 export class UsersController {
   constructor(private readonly users: UsersService) {}
 
