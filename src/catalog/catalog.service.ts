@@ -16,13 +16,34 @@ const toDecimal = (value: string | number) => new Prisma.Decimal(value);
 const autoSku = (name: string) =>
   `auto-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40)}-${Date.now().toString(36)}`;
 
-type StockStatus = "in_stock" | "low" | "out";
+type StockStatus = "in_stock" | "low stock" | "out of stock";
 
 const productInclude = {
   category: true,
   productType: true,
-  inventoryItems: true,
+  inventoryItems: { include: { location: true } },
 } as const;
+
+type ProductWithRelations = Prisma.ProductGetPayload<{ include: typeof productInclude }>;
+
+type EnrichedProduct = Omit<ProductWithRelations, "sellingPrice" | "costPrice"> & {
+  imageUrl: string | null;
+  onHand: string;
+  reserved: string;
+  available: string;
+  stockStatus: StockStatus;
+  sellingPrice: string;
+  costPrice: string;
+};
+
+const normalizeStockStatus = (value?: string): StockStatus | undefined => {
+  if (!value) return undefined;
+  const v = value.toLowerCase().trim();
+  if (v === "out" || v === "out of stock") return "out of stock";
+  if (v === "low" || v === "low stock") return "low stock";
+  if (v === "in_stock" || v === "in stock") return "in_stock";
+  return undefined;
+};
 
 @Injectable()
 export class CatalogService {
@@ -36,18 +57,18 @@ export class CatalogService {
 
   private stockStatus(available: Prisma.Decimal, restockAt: number): StockStatus {
     if (available.lte(0)) {
-      return "out";
+      return "out of stock";
     }
     if (available.lte(restockAt)) {
-      return "low";
+      return "low stock";
     }
     return "in_stock";
   }
 
   private async enrichProduct(
-    product: Prisma.ProductGetPayload<{ include: typeof productInclude }>,
+    product: ProductWithRelations,
     locationId: string,
-  ) {
+  ): Promise<EnrichedProduct> {
     const { onHand, reserved, available } = await productStockSnapshot(
       this.prisma,
       product.id,
@@ -93,7 +114,7 @@ export class CatalogService {
     q?: string;
     categoryId?: string;
     productTypeId?: string;
-    stockStatus?: StockStatus;
+    stockStatus?: string;
     skip?: number;
     take?: number;
   }) {
@@ -101,15 +122,16 @@ export class CatalogService {
     const skip = params.skip ?? 0;
     const where = this.buildWhere(params);
     const defaultLoc = await this.locations.getDefault();
+    const stockFilter = normalizeStockStatus(params.stockStatus);
 
-    if (params.stockStatus) {
+    if (stockFilter) {
       const raw = await this.prisma.product.findMany({
         where,
         orderBy: { name: "asc" },
         include: productInclude,
       });
       const enriched = await Promise.all(raw.map((p) => this.enrichProduct(p, defaultLoc.id)));
-      const filtered = enriched.filter((p) => p.stockStatus === params.stockStatus);
+      const filtered = enriched.filter((p) => p.stockStatus === stockFilter);
       const total = filtered.length;
       const items = filtered.slice(skip, skip + take);
       return { items, total, skip, take };
@@ -137,7 +159,7 @@ export class CatalogService {
       q?: string;
       categoryId?: string;
       productTypeId?: string;
-      stockStatus?: StockStatus;
+      stockStatus?: string;
     },
   ) {
     const { items } = await this.listProducts({
@@ -170,23 +192,16 @@ export class CatalogService {
     return this.exportService.build(format, `products-${Date.now()}`, columns, rows);
   }
 
-  async getProduct(id: string) {
+  async getProduct(id: string): Promise<EnrichedProduct> {
     const product = await this.prisma.product.findUnique({
       where: { id },
-      include: {
-        category: true,
-        productType: true,
-        inventoryItems: { include: { location: true } },
-      },
+      include: productInclude,
     });
     if (!product) {
       throw new NotFoundException("Product not found");
     }
     const defaultLoc = await this.locations.getDefault();
-    return this.enrichProduct(
-      { ...product, inventoryItems: product.inventoryItems },
-      defaultLoc.id,
-    );
+    return this.enrichProduct(product, defaultLoc.id);
   }
 
   async createProduct(

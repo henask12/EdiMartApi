@@ -70,7 +70,7 @@ export class CatalogController {
     return this.catalog.createProduct(req.user.userId, body);
   }
 
-  @Roles(RoleName.OWNER, RoleName.STORE_STAFF)
+  @Roles(RoleName.OWNER, RoleName.STORE_STAFF, RoleName.CASHIER)
   @Patch(":id")
   updateProduct(
     @Req() req: Authed,
