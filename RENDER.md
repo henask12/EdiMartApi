@@ -28,7 +28,7 @@ Open **Settings** and set exactly:
 
 Startup runs **`prisma migrate deploy`** (not `db push`). Migrations preserve existing data when changing `Role.name` from enum to text.
 
-If you previously used `db push` only, the first deploy after this change will **baseline** older migrations automatically, then apply `20250520120000_role_name_string`.
+If you previously used `db push` only, or an `init` migration failed (P3009), startup will **roll back failed records**, **baseline** migrations that already match your schema, then apply `20250520120000_role_name_string` only.
 
 ## After deploy
 

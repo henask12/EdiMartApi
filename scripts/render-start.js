@@ -52,7 +52,34 @@ const listMigrations = () => {
     .sort();
 };
 
-/** Mark migrations as applied when the DB was created with db push (no _prisma_migrations history). */
+/** Parse failed migration names from Prisma error output (P3009). */
+const extractFailedMigrations = (output) => {
+  const names = new Set();
+  for (const match of output.matchAll(/`(\d{14}_[^`]+)` migration/g)) {
+    names.add(match[1]);
+  }
+  return [...names];
+};
+
+/** Clear failed rows in _prisma_migrations so deploy can continue. */
+const clearFailedMigrations = (output) => {
+  const failed = extractFailedMigrations(output);
+  if (failed.length === 0 && output.includes("P3009")) {
+    failed.push("20250516000000_init");
+  }
+  for (const name of failed) {
+    console.log(`Marking failed migration as rolled back: ${name}`);
+    const result = runCapture(`npx prisma migrate resolve --rolled-back "${name}"`);
+    if (!result.ok && !result.output.includes("already")) {
+      console.warn(`Could not roll back ${name}:`, result.output);
+    }
+  }
+};
+
+/**
+ * DB already has tables (from db push) or a failed init left migration history inconsistent.
+ * Mark every migration except role_name_string as applied without re-running SQL.
+ */
 const baselineExistingSchema = () => {
   const migrations = listMigrations();
   for (const name of migrations) {
@@ -67,6 +94,15 @@ const baselineExistingSchema = () => {
   }
 };
 
+const recoverMigrationHistory = (output) => {
+  if (output.includes("P3009")) {
+    console.log("Found failed migration record(s) (P3009). Clearing…");
+    clearFailedMigrations(output);
+  }
+  console.log("Baselining schema that already exists on this database…");
+  baselineExistingSchema();
+};
+
 const applyMigrations = () => {
   console.log("Applying database migrations (prisma migrate deploy)...");
   const first = runCapture("npx prisma migrate deploy");
@@ -74,18 +110,22 @@ const applyMigrations = () => {
     return;
   }
 
-  const needsBaseline =
+  const needsRecovery =
     first.output.includes("P3005") ||
+    first.output.includes("P3009") ||
     first.output.includes("database schema is not empty") ||
-    first.output.includes("schema is not empty");
+    first.output.includes("schema is not empty") ||
+    first.output.includes("failed migrations");
 
-  if (needsBaseline) {
-    console.log(
-      "Database has tables but no migration history (common after db push). Baselining, then deploying…",
-    );
-    baselineExistingSchema();
-    run("npx prisma migrate deploy");
-    return;
+  if (needsRecovery) {
+    console.log("Recovering migration history, then deploying pending migrations…");
+    recoverMigrationHistory(first.output);
+    const second = runCapture("npx prisma migrate deploy");
+    if (second.ok) {
+      return;
+    }
+    console.error("prisma migrate deploy failed after recovery:\n", second.output);
+    process.exit(1);
   }
 
   console.error("prisma migrate deploy failed:\n", first.output);
