@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, Req, Res } from "@nestjs/common";
-import { RoleName } from "@prisma/client";
+import { CASHIER_ROLE, OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import type { Response } from "express";
 import { Type } from "class-transformer";
 import { IsArray, IsOptional, IsString, ValidateNested } from "class-validator";
@@ -37,7 +37,7 @@ type Authed = { user: { userId: string } };
 export class SalesController {
   constructor(private readonly sales: SalesService) {}
 
-  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @Get("export")
   async export(
     @Res() res: Response,
@@ -49,7 +49,7 @@ export class SalesController {
     sendExport(res, result);
   }
 
-  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @Get()
   list(
     @Query("skip") skip?: string,
@@ -65,19 +65,19 @@ export class SalesController {
     });
   }
 
-  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @Get("today-summary")
   todaySummary() {
     return this.sales.todaySummary();
   }
 
-  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @Get(":id")
   get(@Param("id") id: string) {
     return this.sales.getSale(id);
   }
 
-  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @Post("checkout")
   checkout(@Req() req: Authed, @Body() body: CheckoutDto) {
     return this.sales.checkout(req.user.userId, body);

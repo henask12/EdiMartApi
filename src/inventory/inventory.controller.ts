@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post, Query, Req } from "@nestjs/common";
-import { RoleName } from "@prisma/client";
+import { CASHIER_ROLE, OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import { Roles } from "../common/decorators/roles.decorator";
 import { InventoryService } from "./inventory.service";
 import { IsOptional, IsString, MinLength } from "class-validator";
@@ -66,19 +66,19 @@ export class InventoryController {
     });
   }
 
-  @Roles(RoleName.OWNER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
   @Post("receive")
   receive(@Req() req: Authed, @Body() body: ReceiveDto) {
     return this.inventory.receiveGoods(req.user.userId, body);
   }
 
-  @Roles(RoleName.OWNER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
   @Post("adjust")
   adjust(@Req() req: Authed, @Body() body: AdjustDto) {
     return this.inventory.adjustStock(req.user.userId, body);
   }
 
-  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @Post("return")
   returnToStock(@Req() req: Authed, @Body() body: ReturnDto) {
     return this.inventory.returnToStock(req.user.userId, body);

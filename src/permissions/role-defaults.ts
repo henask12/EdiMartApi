@@ -1,4 +1,10 @@
-import { PermissionKey, RoleName } from "@prisma/client";
+import { PermissionKey } from ".prisma/client";
+import {
+  CASHIER_ROLE,
+  ONLINE_MANAGER_ROLE,
+  OWNER_ROLE,
+  STORE_STAFF_ROLE,
+} from "../common/role.constants";
 
 export const ALL_PERMISSIONS = Object.values(PermissionKey) as PermissionKey[];
 
@@ -34,9 +40,9 @@ const cashierPermissions: PermissionKey[] = [
   PermissionKey.REPORTING_VIEW,
 ];
 
-export const DEFAULT_ROLE_PERMISSIONS: Record<RoleName, PermissionKey[]> = {
-  [RoleName.OWNER]: ALL_PERMISSIONS,
-  [RoleName.STORE_STAFF]: staffPermissions,
-  [RoleName.CASHIER]: cashierPermissions,
-  [RoleName.ONLINE_MANAGER]: [PermissionKey.PRODUCTS_VIEW],
+export const DEFAULT_ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {
+  [OWNER_ROLE]: ALL_PERMISSIONS,
+  [STORE_STAFF_ROLE]: staffPermissions,
+  [CASHIER_ROLE]: cashierPermissions,
+  [ONLINE_MANAGER_ROLE]: [PermissionKey.PRODUCTS_VIEW],
 };

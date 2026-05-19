@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
-import { ReservationStatus, RoleName } from "@prisma/client";
+import { ReservationStatus } from ".prisma/client";
+import { CASHIER_ROLE, OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import { IsEnum, IsOptional, IsString } from "class-validator";
 import { Roles } from "../common/decorators/roles.decorator";
 import { ReservationsService } from "./reservations.service";
@@ -41,19 +42,19 @@ export class ReservationsController {
     });
   }
 
-  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @Post()
   create(@Req() req: Authed, @Body() body: CreateReservationDto) {
     return this.reservations.create(req.user.userId, body);
   }
 
-  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @Post(":id/cancel")
   cancel(@Req() req: Authed, @Param("id") id: string) {
     return this.reservations.cancel(req.user.userId, id);
   }
 
-  @Roles(RoleName.OWNER, RoleName.CASHIER)
+  @Roles(OWNER_ROLE, CASHIER_ROLE)
   @Post(":id/complete")
   complete(@Req() req: Authed, @Param("id") id: string) {
     return this.reservations.completeAsSale(req.user.userId, id);

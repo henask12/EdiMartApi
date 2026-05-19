@@ -1,18 +1,12 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../node_modules/.prisma/client"
+  // Generate next to apps/api's @prisma/client so the API TypeScript project resolves full types.
+  output   = "../../../apps/api/node_modules/.prisma/client"
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-}
-
-enum RoleName {
-  OWNER
-  CASHIER
-  STORE_STAFF
-  ONLINE_MANAGER
 }
 
 enum PermissionKey {
@@ -64,7 +58,7 @@ enum NotificationType {
 
 model Role {
   id          String           @id @default(cuid())
-  name        RoleName         @unique
+  name        String           @unique
   isProtected Boolean          @default(false)
   users       User[]
   permissions RolePermission[]

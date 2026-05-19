@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Param, Patch, Post, Req } from "@nestjs/common";
-import { PermissionKey, RoleName } from "@prisma/client";
+import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
+import { PermissionKey } from ".prisma/client";
 import { RequirePermissions } from "../common/decorators/permissions.decorator";
-import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString, MinLength } from "class-validator";
+import { IsBoolean, IsEmail, IsOptional, IsString, MinLength } from "class-validator";
 import { UsersService } from "./users.service";
 
 class CreateUserDto {
@@ -12,8 +12,8 @@ class CreateUserDto {
   @IsString()
   displayName?: string;
 
-  @IsEnum(RoleName)
-  role!: RoleName;
+  @IsString()
+  role!: string;
 
   @IsString()
   @MinLength(6)
@@ -26,8 +26,12 @@ class UpdateUserDto {
   displayName?: string;
 
   @IsOptional()
-  @IsEnum(RoleName)
-  role?: RoleName;
+  @IsString()
+  role?: string;
+
+  @IsOptional()
+  @IsString()
+  roleId?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -48,8 +52,11 @@ export class UsersController {
   constructor(private readonly users: UsersService) {}
 
   @Get()
-  list() {
-    return this.users.list();
+  list(@Query("skip") skip?: string, @Query("take") take?: string) {
+    return this.users.list({
+      skip: skip ? Number(skip) : undefined,
+      take: take ? Number(take) : undefined,
+    });
   }
 
   @Post()

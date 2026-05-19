@@ -5,11 +5,12 @@ import {
   Injectable,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { PermissionKey, RoleName } from "@prisma/client";
+import { PermissionKey } from ".prisma/client";
+import { isOwnerRoleName } from "../role.constants";
 import { PERMISSIONS_KEY } from "../decorators/permissions.decorator";
 
 export type RequestUser = {
-  roleName: RoleName;
+  roleName: string;
   permissions: PermissionKey[];
 };
 
@@ -30,7 +31,7 @@ export class PermissionsGuard implements CanActivate {
     if (!user) {
       throw new ForbiddenException();
     }
-    if (user.roleName === RoleName.OWNER) {
+    if (isOwnerRoleName(user.roleName)) {
       return true;
     }
     const hasAll = required.every((p) => user.permissions.includes(p));

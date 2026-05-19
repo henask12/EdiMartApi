@@ -1,5 +1,5 @@
 import { Controller, Get, Query } from "@nestjs/common";
-import { RoleName } from "@prisma/client";
+import { CASHIER_ROLE, OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import { IsIn, IsOptional, IsString } from "class-validator";
 import { Roles } from "../common/decorators/roles.decorator";
 import { ReportingService } from "./reporting.service";
@@ -17,13 +17,13 @@ class SalesQueryDto {
 export class ReportingController {
   constructor(private readonly reporting: ReportingService) {}
 
-  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @Get("dashboard")
   dashboard() {
     return this.reporting.dashboard();
   }
 
-  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @Get("sales")
   sales(@Query() query: SalesQueryDto) {
     return this.reporting.salesByPeriod(query.period, query.date);

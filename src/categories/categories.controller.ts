@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from "@nestjs/common";
-import { RoleName } from "@prisma/client";
+import { OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import { IsString, MinLength } from "class-validator";
 import { Roles } from "../common/decorators/roles.decorator";
 import { CategoriesService } from "./categories.service";
@@ -26,19 +26,19 @@ export class CategoriesController {
     return this.categories.get(id);
   }
 
-  @Roles(RoleName.OWNER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
   @Post()
   create(@Req() req: Authed, @Body() body: CategoryDto) {
     return this.categories.create(req.user.userId, body.name);
   }
 
-  @Roles(RoleName.OWNER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
   @Patch(":id")
   update(@Req() req: Authed, @Param("id") id: string, @Body() body: CategoryDto) {
     return this.categories.update(req.user.userId, id, body.name);
   }
 
-  @Roles(RoleName.OWNER)
+  @Roles(OWNER_ROLE)
   @Delete(":id")
   remove(@Req() req: Authed, @Param("id") id: string) {
     return this.categories.remove(req.user.userId, id);

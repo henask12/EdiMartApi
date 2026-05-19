@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query, Req, Res } from "@nestjs/common";
-import { MovementType, RoleName } from "@prisma/client";
+import { MovementType } from ".prisma/client";
+import { OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import type { Response } from "express";
 import { IsOptional, IsString } from "class-validator";
 import { Roles } from "../common/decorators/roles.decorator";
@@ -31,7 +32,7 @@ type Authed = { user: { userId: string } };
 export class StockController {
   constructor(private readonly inventory: InventoryService) {}
 
-  @Roles(RoleName.OWNER, RoleName.STORE_STAFF)
+  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
   @Post("receive")
   receive(@Req() req: Authed, @Body() body: ReceiveStockDto) {
     return this.inventory.receiveGoods(req.user.userId, body);
