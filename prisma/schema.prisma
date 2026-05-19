@@ -1,7 +1,6 @@
 generator client {
   provider = "prisma-client-js"
-  // Generate next to apps/api's @prisma/client so the API TypeScript project resolves full types.
-  output   = "../../../apps/api/node_modules/.prisma/client"
+  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {

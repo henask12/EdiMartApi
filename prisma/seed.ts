@@ -6,11 +6,11 @@ import {
 } from "@prisma/client";
 import {
   BUILTIN_ROLES,
-  DEFAULT_ROLE_PERMISSIONS,
-  OWNER_ROLE,
   CASHIER_ROLE,
+  OWNER_ROLE,
   STORE_STAFF_ROLE,
-} from "../src/permissions";
+} from "../src/common/role.constants";
+import { DEFAULT_ROLE_PERMISSIONS } from "../src/permissions/role-defaults";
 import * as bcrypt from "bcryptjs";
 import { CATALOG_CATEGORIES, CATALOG_PRODUCTS } from "./catalog-seed-data";
 

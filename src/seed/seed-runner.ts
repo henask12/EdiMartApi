@@ -2,9 +2,14 @@ import {
   MovementType,
   PaymentMethod,
   PrismaClient,
-  RoleName,
 } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
+import {
+  BUILTIN_ROLES,
+  CASHIER_ROLE,
+  OWNER_ROLE,
+  STORE_STAFF_ROLE,
+} from "../common/role.constants";
 import { CATALOG_CATEGORIES, CATALOG_PRODUCTS } from "../../prisma/catalog-seed-data";
 
 const hash = (password: string) => bcrypt.hash(password, 10);
@@ -14,17 +19,16 @@ const autoSku = (name: string) =>
 
 export const runSeed = async (prisma: PrismaClient) => {
   const roles = await Promise.all(
-    (Object.keys(RoleName) as (keyof typeof RoleName)[]).map(async (key) => {
-      const name = RoleName[key];
-      return prisma.role.upsert({
+    BUILTIN_ROLES.map(async (name) =>
+      prisma.role.upsert({
         where: { name },
-        update: {},
-        create: { name },
-      });
-    }),
+        update: { isProtected: name === OWNER_ROLE },
+        create: { name, isProtected: name === OWNER_ROLE },
+      }),
+    ),
   );
 
-  const roleByName = (n: RoleName) => roles.find((r) => r.name === n)!;
+  const roleByName = (n: string) => roles.find((r) => r.name === n)!;
 
   const defaultLoc = await prisma.location.upsert({
     where: { code: "DEFAULT_STORE" },
@@ -42,9 +46,9 @@ export const runSeed = async (prisma: PrismaClient) => {
     categoryByName.set(name, cat);
   }
 
-  const ownerRole = roleByName(RoleName.OWNER);
-  const cashierRole = roleByName(RoleName.CASHIER);
-  const staffRole = roleByName(RoleName.STORE_STAFF);
+  const ownerRole = roleByName(OWNER_ROLE);
+  const cashierRole = roleByName(CASHIER_ROLE);
+  const staffRole = roleByName(STORE_STAFF_ROLE);
 
   await prisma.user.upsert({
     where: { email: "owner@edisims.local" },
