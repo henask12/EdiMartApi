@@ -13,7 +13,7 @@ export class UploadsService {
     return `${base.replace(/\/$/, "")}/uploads/${filename}`;
   }
 
-  async saveProductImage(file: Express.Multer.File) {
+  async saveImage(file: Express.Multer.File) {
     await mkdir(this.uploadDir, { recursive: true });
     const ext = extname(file.originalname).toLowerCase() || ".jpg";
     const allowed = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
@@ -25,5 +25,13 @@ export class UploadsService {
       path: `/uploads/${filename}`,
       url: this.getPublicUrl(filename),
     };
+  }
+
+  saveProductImage(file: Express.Multer.File) {
+    return this.saveImage(file);
+  }
+
+  saveSaleProof(file: Express.Multer.File) {
+    return this.saveImage(file);
   }
 }

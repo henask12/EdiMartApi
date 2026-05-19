@@ -16,6 +16,10 @@ export class CreateProductDto {
   @IsString()
   categoryId!: string;
 
+  @IsOptional()
+  @IsString()
+  productTypeId?: string;
+
   @IsString()
   sellingPrice!: string;
 
@@ -65,6 +69,10 @@ export class UpdateProductDto {
   @IsOptional()
   @IsString()
   categoryId?: string;
+
+  @IsOptional()
+  @IsString()
+  productTypeId?: string;
 
   @IsOptional()
   @IsString()

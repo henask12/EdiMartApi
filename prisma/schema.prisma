@@ -34,6 +34,7 @@ enum MovementType {
 
 enum NotificationType {
   LOW_STOCK
+  OUT_OF_STOCK
   EXPIRY
 }
 
@@ -49,6 +50,7 @@ model User {
   email           String           @unique
   passwordHash    String
   displayName     String?
+  isActive        Boolean          @default(true)
   roleId          String
   role            Role             @relation(fields: [roleId], references: [id])
   createdAt       DateTime         @default(now())
@@ -81,12 +83,21 @@ model Category {
   createdAt DateTime  @default(now())
 }
 
+model ProductType {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  products  Product[]
+  createdAt DateTime  @default(now())
+}
+
 model Product {
   id            String            @id @default(cuid())
   sku           String?           @unique
   name          String
   categoryId    String
   category      Category          @relation(fields: [categoryId], references: [id])
+  productTypeId String?
+  productType   ProductType?      @relation(fields: [productTypeId], references: [id])
   imagePath       String?
   description     String?
   originCountry   String?
@@ -95,6 +106,7 @@ model Product {
   restockAt     Int               @default(0)
   restockQty    Int               @default(0)
   isActive      Boolean           @default(true)
+  lastOutOfStockAlertAt DateTime?
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
   inventoryItems InventoryItem[]
@@ -198,8 +210,19 @@ model Sale {
   createdAt       DateTime              @default(now())
   lines           SaleLine[]
   payments        PaymentAllocation[]
+  attachments     SaleAttachment[]
 
   @@index([createdAt])
+}
+
+model SaleAttachment {
+  id        String   @id @default(cuid())
+  saleId    String
+  sale      Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  imagePath String
+  createdAt DateTime @default(now())
+
+  @@index([saleId])
 }
 
 model SaleLine {

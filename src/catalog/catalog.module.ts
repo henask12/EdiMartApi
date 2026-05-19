@@ -4,9 +4,10 @@ import { CatalogController } from "./catalog.controller";
 import { LocationsModule } from "../locations/locations.module";
 import { AuditModule } from "../audit/audit.module";
 import { InventoryModule } from "../inventory/inventory.module";
+import { ExportModule } from "../export/export.module";
 
 @Module({
-  imports: [LocationsModule, AuditModule, InventoryModule],
+  imports: [LocationsModule, AuditModule, InventoryModule, ExportModule],
   controllers: [CatalogController],
   providers: [CatalogService],
   exports: [CatalogService],

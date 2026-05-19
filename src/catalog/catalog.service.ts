@@ -9,11 +9,20 @@ import { LocationsService } from "../locations/locations.service";
 import { AuditService } from "../audit/audit.service";
 import { InventoryService } from "../inventory/inventory.service";
 import { productStockSnapshot } from "../common/stock.util";
+import { ExportService, type ExportColumn } from "../export/export.service";
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
 
 const autoSku = (name: string) =>
   `auto-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40)}-${Date.now().toString(36)}`;
+
+type StockStatus = "in_stock" | "low" | "out";
+
+const productInclude = {
+  category: true,
+  productType: true,
+  inventoryItems: true,
+} as const;
 
 @Injectable()
 export class CatalogService {
@@ -22,12 +31,21 @@ export class CatalogService {
     private readonly locations: LocationsService,
     private readonly audit: AuditService,
     private readonly inventory: InventoryService,
+    private readonly exportService: ExportService,
   ) {}
 
+  private stockStatus(available: Prisma.Decimal, restockAt: number): StockStatus {
+    if (available.lte(0)) {
+      return "out";
+    }
+    if (available.lte(restockAt)) {
+      return "low";
+    }
+    return "in_stock";
+  }
+
   private async enrichProduct(
-    product: Prisma.ProductGetPayload<{
-      include: { category: true; inventoryItems: true };
-    }>,
+    product: Prisma.ProductGetPayload<{ include: typeof productInclude }>,
     locationId: string,
   ) {
     const { onHand, reserved, available } = await productStockSnapshot(
@@ -44,34 +62,66 @@ export class CatalogService {
       onHand: onHand.toString(),
       reserved: reserved.toString(),
       available: available.toString(),
+      stockStatus: this.stockStatus(available, product.restockAt),
       sellingPrice: product.sellingPrice.toFixed(2),
       costPrice: product.costPrice.toFixed(2),
     };
   }
 
+  private buildWhere(params: {
+    q?: string;
+    categoryId?: string;
+    productTypeId?: string;
+  }): Prisma.ProductWhereInput {
+    const where: Prisma.ProductWhereInput = { isActive: true };
+    if (params.q) {
+      where.OR = [
+        { name: { contains: params.q, mode: "insensitive" } },
+        { sku: { contains: params.q, mode: "insensitive" } },
+      ];
+    }
+    if (params.categoryId) {
+      where.categoryId = params.categoryId;
+    }
+    if (params.productTypeId) {
+      where.productTypeId = params.productTypeId;
+    }
+    return where;
+  }
+
   async listProducts(params: {
     q?: string;
     categoryId?: string;
+    productTypeId?: string;
+    stockStatus?: StockStatus;
     skip?: number;
     take?: number;
   }) {
     const take = Math.min(params.take ?? 100, 200);
     const skip = params.skip ?? 0;
-    const where: Prisma.ProductWhereInput = { isActive: true };
-    if (params.q) {
-      where.name = { contains: params.q, mode: "insensitive" };
-    }
-    if (params.categoryId) {
-      where.categoryId = params.categoryId;
-    }
+    const where = this.buildWhere(params);
     const defaultLoc = await this.locations.getDefault();
+
+    if (params.stockStatus) {
+      const raw = await this.prisma.product.findMany({
+        where,
+        orderBy: { name: "asc" },
+        include: productInclude,
+      });
+      const enriched = await Promise.all(raw.map((p) => this.enrichProduct(p, defaultLoc.id)));
+      const filtered = enriched.filter((p) => p.stockStatus === params.stockStatus);
+      const total = filtered.length;
+      const items = filtered.slice(skip, skip + take);
+      return { items, total, skip, take };
+    }
+
     const [raw, total] = await Promise.all([
       this.prisma.product.findMany({
         where,
         skip,
         take,
         orderBy: { name: "asc" },
-        include: { category: true, inventoryItems: true },
+        include: productInclude,
       }),
       this.prisma.product.count({ where }),
     ]);
@@ -81,11 +131,51 @@ export class CatalogService {
     return { items, total, skip, take };
   }
 
+  async exportProducts(
+    format: "csv" | "xlsx" | "pdf",
+    params: {
+      q?: string;
+      categoryId?: string;
+      productTypeId?: string;
+      stockStatus?: StockStatus;
+    },
+  ) {
+    const { items } = await this.listProducts({
+      ...params,
+      skip: 0,
+      take: 10000,
+    });
+    const columns: ExportColumn[] = [
+      { header: "SKU", key: "sku" },
+      { header: "Name", key: "name" },
+      { header: "Type", key: "type" },
+      { header: "Category", key: "category" },
+      { header: "On hand", key: "onHand" },
+      { header: "Available", key: "available" },
+      { header: "Status", key: "status" },
+      { header: "Cost", key: "cost" },
+      { header: "Price", key: "price" },
+    ];
+    const rows = items.map((p) => ({
+      sku: p.sku ?? "",
+      name: p.name,
+      type: p.productType?.name ?? "",
+      category: p.category.name,
+      onHand: p.onHand,
+      available: p.available,
+      status: p.stockStatus,
+      cost: p.costPrice,
+      price: p.sellingPrice,
+    }));
+    return this.exportService.build(format, `products-${Date.now()}`, columns, rows);
+  }
+
   async getProduct(id: string) {
     const product = await this.prisma.product.findUnique({
       where: { id },
       include: {
         category: true,
+        productType: true,
         inventoryItems: { include: { location: true } },
       },
     });
@@ -93,7 +183,10 @@ export class CatalogService {
       throw new NotFoundException("Product not found");
     }
     const defaultLoc = await this.locations.getDefault();
-    return this.enrichProduct(product, defaultLoc.id);
+    return this.enrichProduct(
+      { ...product, inventoryItems: product.inventoryItems },
+      defaultLoc.id,
+    );
   }
 
   async createProduct(
@@ -101,6 +194,7 @@ export class CatalogService {
     data: {
       name: string;
       categoryId: string;
+      productTypeId?: string;
       sellingPrice: string;
       costPrice?: string;
       restockAt?: number;
@@ -122,6 +216,12 @@ export class CatalogService {
     if (!category) {
       throw new BadRequestException("Category not found");
     }
+    if (data.productTypeId) {
+      const pt = await this.prisma.productType.findUnique({ where: { id: data.productTypeId } });
+      if (!pt) {
+        throw new BadRequestException("Product type not found");
+      }
+    }
     const existing = await this.prisma.product.findUnique({
       where: { categoryId_name: { categoryId: data.categoryId, name } },
     });
@@ -136,6 +236,7 @@ export class CatalogService {
           sku: autoSku(name),
           name,
           categoryId: data.categoryId,
+          productTypeId: data.productTypeId ?? null,
           imagePath: data.imagePath,
           description: data.description?.trim() || null,
           originCountry: data.originCountry?.trim() || null,
@@ -177,6 +278,7 @@ export class CatalogService {
     data: Partial<{
       name: string;
       categoryId: string;
+      productTypeId: string | null;
       sellingPrice: string;
       costPrice: string;
       restockAt: number;
@@ -187,12 +289,26 @@ export class CatalogService {
       originCountry: string;
     }>,
   ) {
-    await this.ensureProduct(id);
-    if (data.name && data.categoryId) {
+    const existing = await this.ensureProduct(id);
+    if (data.productTypeId) {
+      const pt = await this.prisma.productType.findUnique({ where: { id: data.productTypeId } });
+      if (!pt) {
+        throw new BadRequestException("Product type not found");
+      }
+    }
+    if (data.categoryId) {
+      const cat = await this.prisma.category.findUnique({ where: { id: data.categoryId } });
+      if (!cat) {
+        throw new BadRequestException("Category not found");
+      }
+    }
+    if (data.name !== undefined || data.categoryId !== undefined) {
+      const targetCategoryId = data.categoryId ?? existing.categoryId;
+      const targetName = (data.name ?? existing.name).trim();
       const dup = await this.prisma.product.findFirst({
         where: {
-          categoryId: data.categoryId,
-          name: data.name.trim(),
+          categoryId: targetCategoryId,
+          name: targetName,
           NOT: { id },
         },
       });
@@ -205,6 +321,8 @@ export class CatalogService {
       data: {
         name: data.name?.trim(),
         categoryId: data.categoryId,
+        productTypeId:
+          data.productTypeId !== undefined ? data.productTypeId : undefined,
         imagePath: data.imagePath,
         description:
           data.description !== undefined ? data.description.trim() || null : undefined,

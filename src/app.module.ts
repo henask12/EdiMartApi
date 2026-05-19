@@ -7,6 +7,8 @@ import { UsersModule } from "./users/users.module";
 import { AuditModule } from "./audit/audit.module";
 import { CatalogModule } from "./catalog/catalog.module";
 import { CategoriesModule } from "./categories/categories.module";
+import { ProductTypesModule } from "./product-types/product-types.module";
+import { ExportModule } from "./export/export.module";
 import { InventoryModule } from "./inventory/inventory.module";
 import { SalesModule } from "./sales/sales.module";
 import { ReservationsModule } from "./reservations/reservations.module";
@@ -33,6 +35,8 @@ import { RolesGuard } from "./common/guards/roles.guard";
     AuthModule,
     LocationsModule,
     CategoriesModule,
+    ProductTypesModule,
+    ExportModule,
     CatalogModule,
     UploadsModule,
     InventoryModule,

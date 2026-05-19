@@ -7,9 +7,12 @@ import {
   Post,
   Query,
   Req,
+  Res,
 } from "@nestjs/common";
 import { RoleName } from "@prisma/client";
+import type { Response } from "express";
 import { Roles } from "../common/decorators/roles.decorator";
+import { parseExportFormat, sendExport } from "../export/export-response.util";
 import { CatalogService } from "./catalog.service";
 import { CreateProductDto, UpdateProductDto } from "./dto/catalog.dto";
 
@@ -19,16 +22,38 @@ type Authed = { user: { userId: string } };
 export class CatalogController {
   constructor(private readonly catalog: CatalogService) {}
 
+  @Get("export")
+  async exportProducts(
+    @Res() res: Response,
+    @Query("format") format?: string,
+    @Query("q") q?: string,
+    @Query("categoryId") categoryId?: string,
+    @Query("productTypeId") productTypeId?: string,
+    @Query("stockStatus") stockStatus?: "in_stock" | "low" | "out",
+  ) {
+    const result = await this.catalog.exportProducts(parseExportFormat(format), {
+      q,
+      categoryId,
+      productTypeId,
+      stockStatus,
+    });
+    sendExport(res, result);
+  }
+
   @Get()
   listProducts(
     @Query("q") q?: string,
     @Query("categoryId") categoryId?: string,
+    @Query("productTypeId") productTypeId?: string,
+    @Query("stockStatus") stockStatus?: "in_stock" | "low" | "out",
     @Query("skip") skip?: string,
     @Query("take") take?: string,
   ) {
     return this.catalog.listProducts({
       q,
       categoryId,
+      productTypeId,
+      stockStatus,
       skip: skip ? Number(skip) : undefined,
       take: take ? Number(take) : undefined,
     });

@@ -69,21 +69,64 @@ export class NotificationsService {
     });
   }
 
-  async checkLowStockForProduct(productId: string) {
+  /** Called after stock changes (receive, sale, adjust). */
+  async checkStockAlertsForProduct(productId: string) {
     const defaultLoc = await this.locations.getDefault();
     const product = await this.prisma.product.findUnique({ where: { id: productId } });
     if (!product) {
       return;
     }
     const { available } = await productStockSnapshot(this.prisma, productId, defaultLoc.id);
-    if (available.gt(product.restockAt)) {
+
+    if (available.lte(0)) {
+      await this.sendOutOfStockAlert(product.id, product.name, available);
       return;
     }
+
+    if (product.lastOutOfStockAlertAt) {
+      await this.prisma.product.update({
+        where: { id: productId },
+        data: { lastOutOfStockAlertAt: null },
+      });
+    }
+
+    if (available.lte(product.restockAt)) {
+      await this.sendLowStockAlert(product, available);
+    }
+  }
+
+  async checkLowStockForProduct(productId: string) {
+    return this.checkStockAlertsForProduct(productId);
+  }
+
+  private async sendOutOfStockAlert(
+    productId: string,
+    productName: string,
+    available: Prisma.Decimal,
+  ) {
+    const product = await this.prisma.product.findUnique({ where: { id: productId } });
+    if (!product?.lastOutOfStockAlertAt) {
+      const subject = `Out of stock: ${productName}`;
+      const html = `<p><strong>${productName}</strong> is now out of stock.</p>
+        <p>Available: ${available.toString()}</p>
+        <p>Please restock as soon as possible.</p>`;
+      await this.sendMail(subject, html, NotificationType.OUT_OF_STOCK, { productId });
+      await this.prisma.product.update({
+        where: { id: productId },
+        data: { lastOutOfStockAlertAt: new Date() },
+      });
+    }
+  }
+
+  private async sendLowStockAlert(
+    product: { id: string; name: string; restockAt: number; restockQty: number },
+    available: Prisma.Decimal,
+  ) {
     const subject = `Low stock: ${product.name}`;
     const html = `<p><strong>${product.name}</strong> is low.</p>
       <p>Available: ${available.toString()} (alert at ${product.restockAt})</p>
       <p>Suggested reorder: ${product.restockQty} units</p>`;
-    await this.sendMail(subject, html, NotificationType.LOW_STOCK, { productId });
+    await this.sendMail(subject, html, NotificationType.LOW_STOCK, { productId: product.id });
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_8AM)

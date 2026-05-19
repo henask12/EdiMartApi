@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, Req, Res } from "@nestjs/common";
 import { RoleName } from "@prisma/client";
+import type { Response } from "express";
 import { Type } from "class-transformer";
 import { IsArray, IsOptional, IsString, ValidateNested } from "class-validator";
 import { Roles } from "../common/decorators/roles.decorator";
+import { parseExportFormat, sendExport } from "../export/export-response.util";
 import { SalesService } from "./sales.service";
 
 class CheckoutLineDto {
@@ -22,6 +24,11 @@ class CheckoutDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  proofImagePaths?: string[];
 }
 
 type Authed = { user: { userId: string } };
@@ -29,6 +36,18 @@ type Authed = { user: { userId: string } };
 @Controller("sales")
 export class SalesController {
   constructor(private readonly sales: SalesService) {}
+
+  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Get("export")
+  async export(
+    @Res() res: Response,
+    @Query("format") format?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    const result = await this.sales.exportSales(parseExportFormat(format), { from, to });
+    sendExport(res, result);
+  }
 
   @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
   @Get()
@@ -47,14 +66,20 @@ export class SalesController {
   }
 
   @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
-  @Post("checkout")
-  checkout(@Req() req: Authed, @Body() body: CheckoutDto) {
-    return this.sales.checkout(req.user.userId, body);
-  }
-
-  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
   @Get("today-summary")
   todaySummary() {
     return this.sales.todaySummary();
+  }
+
+  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Get(":id")
+  get(@Param("id") id: string) {
+    return this.sales.getSale(id);
+  }
+
+  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Post("checkout")
+  checkout(@Req() req: Authed, @Body() body: CheckoutDto) {
+    return this.sales.checkout(req.user.userId, body);
   }
 }

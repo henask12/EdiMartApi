@@ -36,11 +36,11 @@ export class CategoriesService {
     if (!trimmed) {
       throw new BadRequestException("Category name is required");
     }
-    const existing = await this.prisma.category.findUnique({
-      where: { name: trimmed },
+    const existing = await this.prisma.category.findFirst({
+      where: { name: { equals: trimmed, mode: "insensitive" } },
     });
     if (existing) {
-      throw new BadRequestException("Category already exists");
+      throw new BadRequestException("A category with this name already exists");
     }
     const cat = await this.prisma.category.create({ data: { name: trimmed } });
     await this.audit.log(userId, "CREATE", "Category", cat.id, { name: trimmed });
@@ -54,10 +54,13 @@ export class CategoriesService {
       throw new BadRequestException("Category name is required");
     }
     const dup = await this.prisma.category.findFirst({
-      where: { name: trimmed, NOT: { id } },
+      where: {
+        name: { equals: trimmed, mode: "insensitive" },
+        NOT: { id },
+      },
     });
     if (dup) {
-      throw new BadRequestException("Category name already in use");
+      throw new BadRequestException("A category with this name already exists");
     }
     const cat = await this.prisma.category.update({
       where: { id },

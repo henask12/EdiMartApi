@@ -29,4 +29,19 @@ export class UploadsController {
     }
     return this.uploads.saveProductImage(file);
   }
+
+  @Roles(RoleName.OWNER, RoleName.CASHIER, RoleName.STORE_STAFF)
+  @Post("sale-proof")
+  @UseInterceptors(
+    FileInterceptor("file", {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  uploadSaleProof(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      return { message: "No file uploaded" };
+    }
+    return this.uploads.saveSaleProof(file);
+  }
 }

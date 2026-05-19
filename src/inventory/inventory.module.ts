@@ -4,9 +4,11 @@ import { StockController } from "./stock.controller";
 import { InventoryService } from "./inventory.service";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { LocationsModule } from "../locations/locations.module";
+import { ExportModule } from "../export/export.module";
+import { AuditModule } from "../audit/audit.module";
 
 @Module({
-  imports: [NotificationsModule, LocationsModule],
+  imports: [NotificationsModule, LocationsModule, ExportModule, AuditModule],
   controllers: [InventoryController, StockController],
   providers: [InventoryService],
   exports: [InventoryService],

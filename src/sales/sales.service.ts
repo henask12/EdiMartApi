@@ -9,13 +9,17 @@ import { LocationsService } from "../locations/locations.service";
 import { AuditService } from "../audit/audit.service";
 import { productStockSnapshot } from "../common/stock.util";
 import { NotificationsService } from "../notifications/notifications.service";
+import { buildCreatedAtRange } from "../common/date-range.util";
+import { ExportService, type ExportColumn } from "../export/export.service";
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
+
+const apiBase = () =>
+  (process.env.PUBLIC_API_URL ?? "http://127.0.0.1:4000").replace(/\/$/, "");
 
 type CheckoutLineInput = {
   productId: string;
   quantity: string;
-  /** When set, fulfills this reservation (skips available check; releases hold on sale). */
   reservationId?: string;
 };
 
@@ -26,20 +30,38 @@ export class SalesService {
     private readonly locations: LocationsService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly exportService: ExportService,
   ) {}
+
+  private mapSale(
+    sale: Prisma.SaleGetPayload<{
+      include: {
+        lines: { include: { product: true } };
+        createdBy: { select: { id: true; displayName: true; email: true } };
+        attachments: true;
+      };
+    }>,
+  ) {
+    return {
+      ...sale,
+      grandTotal: sale.grandTotal.toFixed(2),
+      subtotal: sale.subtotal.toFixed(2),
+      attachments: sale.attachments.map((a) => ({
+        id: a.id,
+        imagePath: a.imagePath,
+        imageUrl: `${apiBase()}${a.imagePath}`,
+        createdAt: a.createdAt,
+      })),
+    };
+  }
 
   async listSales(params: { skip?: number; take?: number; from?: string; to?: string }) {
     const take = Math.min(params.take ?? 50, 200);
     const skip = params.skip ?? 0;
     const where: Prisma.SaleWhereInput = {};
-    if (params.from || params.to) {
-      where.createdAt = {};
-      if (params.from) {
-        where.createdAt.gte = new Date(params.from);
-      }
-      if (params.to) {
-        where.createdAt.lte = new Date(params.to);
-      }
+    const createdAt = buildCreatedAtRange(params.from, params.to);
+    if (createdAt) {
+      where.createdAt = createdAt;
     }
     const [items, total] = await Promise.all([
       this.prisma.sale.findMany({
@@ -50,25 +72,62 @@ export class SalesService {
         include: {
           lines: { include: { product: true } },
           createdBy: { select: { id: true, displayName: true, email: true } },
+          attachments: true,
         },
       }),
       this.prisma.sale.count({ where }),
     ]);
     return {
-      items: items.map((s) => ({
-        ...s,
-        grandTotal: s.grandTotal.toFixed(2),
-        subtotal: s.subtotal.toFixed(2),
-      })),
+      items: items.map((s) => this.mapSale(s)),
       total,
       skip,
       take,
     };
   }
 
+  async getSale(id: string) {
+    const sale = await this.prisma.sale.findUnique({
+      where: { id },
+      include: {
+        lines: { include: { product: true } },
+        createdBy: { select: { id: true, displayName: true, email: true } },
+        attachments: true,
+        payments: true,
+      },
+    });
+    if (!sale) {
+      throw new NotFoundException("Sale not found");
+    }
+    return this.mapSale(sale);
+  }
+
+  async exportSales(
+    format: "csv" | "xlsx" | "pdf",
+    params: { from?: string; to?: string },
+  ) {
+    const { items } = await this.listSales({ ...params, skip: 0, take: 5000 });
+    const columns: ExportColumn[] = [
+      { header: "Sale #", key: "saleNumber" },
+      { header: "Date", key: "date" },
+      { header: "Total", key: "total" },
+      { header: "Items", key: "items" },
+      { header: "Cashier", key: "cashier" },
+    ];
+    const rows = items.map((s) => ({
+      saleNumber: s.saleNumber,
+      date: s.createdAt.toISOString().slice(0, 16).replace("T", " "),
+      total: s.grandTotal,
+      items: s.lines
+        .map((l) => `${l.product.name} x${l.quantity.toString()}`)
+        .join("; "),
+      cashier: s.createdBy.displayName ?? s.createdBy.email,
+    }));
+    return this.exportService.build(format, `sales-${Date.now()}`, columns, rows);
+  }
+
   async checkout(
     userId: string,
-    input: { lines: CheckoutLineInput[]; notes?: string },
+    input: { lines: CheckoutLineInput[]; notes?: string; proofImagePaths?: string[] },
   ) {
     if (!input.lines?.length) {
       throw new BadRequestException("Add at least one product");
@@ -146,6 +205,8 @@ export class SalesService {
       new Prisma.Decimal(0),
     );
 
+    const proofPaths = (input.proofImagePaths ?? []).filter((p) => p.startsWith("/uploads/"));
+
     const receipt = await this.prisma.$transaction(
       async (tx) => {
         const start = new Date();
@@ -180,8 +241,14 @@ export class SalesService {
             payments: {
               create: [{ method: PaymentMethod.CASH, amount: grandTotal }],
             },
+            attachments: proofPaths.length
+              ? { create: proofPaths.map((imagePath) => ({ imagePath })) }
+              : undefined,
           },
-          include: { lines: { include: { product: true } } },
+          include: {
+            lines: { include: { product: true } },
+            attachments: true,
+          },
         });
 
         for (const line of computedLines) {
@@ -246,11 +313,13 @@ export class SalesService {
     });
 
     for (const line of computedLines) {
-      await this.notifications.checkLowStockForProduct(line.productId);
+      await this.notifications.checkStockAlertsForProduct(line.productId);
     }
 
+    const full = await this.getSale(receipt.id);
+
     return {
-      sale: receipt,
+      sale: full,
       digitalReceipt: this.buildReceiptText(receipt),
     };
   }

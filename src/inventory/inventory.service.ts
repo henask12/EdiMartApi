@@ -8,6 +8,8 @@ import { PrismaService } from "../prisma/prisma.service";
 import { LocationsService } from "../locations/locations.service";
 import { AuditService } from "../audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { buildCreatedAtRange } from "../common/date-range.util";
+import { ExportService, type ExportColumn } from "../export/export.service";
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
 
@@ -18,18 +20,30 @@ export class InventoryService {
     private readonly locations: LocationsService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly exportService: ExportService,
   ) {}
 
   async listMovements(params: {
     productId?: string;
+    type?: MovementType;
+    from?: string;
+    to?: string;
     take?: number;
     skip?: number;
   }) {
     const take = Math.min(params.take ?? 100, 500);
     const skip = params.skip ?? 0;
-    const where: Prisma.StockMovementWhereInput | undefined = params.productId
-      ? { inventoryItem: { productId: params.productId } }
-      : undefined;
+    const where: Prisma.StockMovementWhereInput = {};
+    if (params.productId) {
+      where.inventoryItem = { productId: params.productId };
+    }
+    if (params.type) {
+      where.type = params.type;
+    }
+    const createdAt = buildCreatedAtRange(params.from, params.to);
+    if (createdAt) {
+      where.createdAt = createdAt;
+    }
     const [items, total] = await Promise.all([
       this.prisma.stockMovement.findMany({
         where,
@@ -47,13 +61,85 @@ export class InventoryService {
     return { items, total, skip, take };
   }
 
-  listBatches(productId: string) {
+  async getMovement(id: string) {
+    const movement = await this.prisma.stockMovement.findUnique({
+      where: { id },
+      include: {
+        inventoryItem: {
+          include: {
+            product: { include: { category: true, productType: true } },
+            location: true,
+          },
+        },
+        stockBatch: true,
+        createdBy: { select: { id: true, email: true, displayName: true } },
+      },
+    });
+    if (!movement) {
+      throw new NotFoundException("Stock movement not found");
+    }
+    const batch = movement.stockBatch;
+    return {
+      ...movement,
+      qtyDelta: movement.qtyDelta.toString(),
+      beforeOnHand: movement.beforeOnHand?.toString() ?? null,
+      afterOnHand: movement.afterOnHand?.toString() ?? null,
+      unitCost: movement.unitCost?.toString() ?? null,
+      stockBatch: batch
+        ? {
+            ...batch,
+            qtyReceived: batch.qtyReceived.toString(),
+            qtyRemaining: batch.qtyRemaining.toString(),
+            unitCost: batch.unitCost.toString(),
+          }
+        : null,
+    };
+  }
+
+  async exportMovements(
+    format: "csv" | "xlsx" | "pdf",
+    params: {
+      productId?: string;
+      type?: MovementType;
+      from?: string;
+      to?: string;
+    },
+  ) {
+    const { items } = await this.listMovements({ ...params, skip: 0, take: 5000 });
+    const columns: ExportColumn[] = [
+      { header: "Date", key: "date" },
+      { header: "Product", key: "product" },
+      { header: "Category", key: "category" },
+      { header: "Type", key: "type" },
+      { header: "Qty", key: "qty" },
+      { header: "Before", key: "before" },
+      { header: "After", key: "after" },
+      { header: "Notes", key: "notes" },
+    ];
+    const rows = items.map((m) => ({
+      date: m.createdAt.toISOString().slice(0, 16).replace("T", " "),
+      product: m.inventoryItem.product.name,
+      category: m.inventoryItem.product.category.name,
+      type: m.type,
+      qty: m.qtyDelta.toString(),
+      before: m.beforeOnHand?.toString() ?? "",
+      after: m.afterOnHand?.toString() ?? "",
+      notes: m.notes ?? "",
+    }));
+    return this.exportService.build(format, `stock-history-${Date.now()}`, columns, rows);
+  }
+
+  listBatches(productId: string, params?: { skip?: number; take?: number }) {
     if (!productId) {
       throw new BadRequestException("productId is required");
     }
+    const take = Math.min(params?.take ?? 50, 200);
+    const skip = params?.skip ?? 0;
     return this.prisma.stockBatch.findMany({
       where: { productId },
       orderBy: { receivedAt: "desc" },
+      skip,
+      take,
       include: {
         receivedBy: { select: { id: true, displayName: true, email: true } },
       },
@@ -253,6 +339,7 @@ export class InventoryService {
       productId: data.productId,
       quantity: data.quantity,
     });
+    await this.notifications.checkLowStockForProduct(data.productId);
     return updated;
   }
 }

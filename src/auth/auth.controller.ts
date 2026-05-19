@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import { AuthService } from "./auth.service";
 import { Public } from "../common/decorators/public.decorator";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
-import { IsEmail, IsString, MinLength } from "class-validator";
+import { IsEmail, IsOptional, IsString, MinLength } from "class-validator";
 
 class LoginDto {
   @IsEmail()
@@ -11,6 +11,26 @@ class LoginDto {
   @IsString()
   @MinLength(6)
   password!: string;
+}
+
+class UpdateProfileDto {
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+}
+
+class ChangePasswordDto {
+  @IsString()
+  @MinLength(6)
+  currentPassword!: string;
+
+  @IsString()
+  @MinLength(6)
+  newPassword!: string;
 }
 
 @Controller("auth")
@@ -32,5 +52,23 @@ export class AuthController {
       displayName: req.user.displayName,
       role: req.user.roleName,
     };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch("me")
+  updateMe(
+    @Req() req: { user: { userId: string } },
+    @Body() body: UpdateProfileDto,
+  ) {
+    return this.auth.updateProfile(req.user.userId, body);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post("change-password")
+  changePassword(
+    @Req() req: { user: { userId: string } },
+    @Body() body: ChangePasswordDto,
+  ) {
+    return this.auth.changePassword(req.user.userId, body.currentPassword, body.newPassword);
   }
 }
