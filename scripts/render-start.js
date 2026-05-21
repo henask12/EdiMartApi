@@ -52,6 +52,13 @@ const listMigrations = () => {
     .sort();
 };
 
+/** Migration resolve succeeded or DB already has this migration applied (P3008). */
+const isMigrationAlreadyApplied = (output) =>
+  output.includes("P3008") ||
+  output.includes("already recorded as applied") ||
+  output.includes("already recorded") ||
+  output.includes("already applied");
+
 /** Parse failed migration names from Prisma error output (P3009). */
 const extractFailedMigrations = (output) => {
   const names = new Set();
@@ -70,7 +77,11 @@ const clearFailedMigrations = (output) => {
   for (const name of failed) {
     console.log(`Marking failed migration as rolled back: ${name}`);
     const result = runCapture(`npx prisma migrate resolve --rolled-back "${name}"`);
-    if (!result.ok && !result.output.includes("already")) {
+    if (
+      !result.ok &&
+      !result.output.includes("already") &&
+      !isMigrationAlreadyApplied(result.output)
+    ) {
       console.warn(`Could not roll back ${name}:`, result.output);
     }
   }
@@ -88,9 +99,14 @@ const baselineExistingSchema = () => {
     }
     console.log(`Marking migration as applied: ${name}`);
     const result = runCapture(`npx prisma migrate resolve --applied "${name}"`);
-    if (!result.ok && !result.output.includes("already recorded")) {
-      console.warn(`Could not resolve ${name}:`, result.output);
+    if (result.ok) {
+      continue;
     }
+    if (isMigrationAlreadyApplied(result.output)) {
+      console.log(`Migration ${name} is already applied, skipping.`);
+      continue;
+    }
+    console.warn(`Could not resolve ${name}:`, result.output);
   }
 };
 
