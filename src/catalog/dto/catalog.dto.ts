@@ -108,11 +108,11 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsString()
-  description?: string;
+  description?: string | null;
 
   @IsOptional()
   @IsString()
-  originCountry?: string;
+  originCountry?: string | null;
 
   @IsOptional()
   @IsString()

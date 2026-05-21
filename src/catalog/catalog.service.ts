@@ -13,6 +13,19 @@ import { ExportService, type ExportColumn } from "../export/export.service";
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
 
+/** PATCH may send `null` for cleared optional text fields — avoid calling `.trim()` on null. */
+const optionalTrimmedString = (
+  value: string | null | undefined,
+): string | null | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value == null || value === "") {
+    return null;
+  }
+  return value.trim();
+};
+
 const autoSku = (name: string) =>
   `auto-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40)}-${Date.now().toString(36)}`;
 
@@ -302,8 +315,8 @@ export class CatalogService {
       restockQty: number;
       isActive: boolean;
       imagePath: string;
-      description: string;
-      originCountry: string;
+      description: string | null;
+      originCountry: string | null;
       expiryDate: string | null;
     }>,
   ) {
@@ -341,11 +354,9 @@ export class CatalogService {
         categoryId: data.categoryId,
         productTypeId:
           data.productTypeId !== undefined ? data.productTypeId : undefined,
-        imagePath: data.imagePath,
-        description:
-          data.description !== undefined ? data.description.trim() || null : undefined,
-        originCountry:
-          data.originCountry !== undefined ? data.originCountry.trim() || null : undefined,
+        ...(data.imagePath !== undefined ? { imagePath: data.imagePath } : {}),
+        description: optionalTrimmedString(data.description),
+        originCountry: optionalTrimmedString(data.originCountry),
         sellingPrice:
           data.sellingPrice !== undefined ? toDecimal(data.sellingPrice) : undefined,
         costPrice: data.costPrice !== undefined ? toDecimal(data.costPrice) : undefined,
