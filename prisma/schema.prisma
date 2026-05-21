@@ -1,7 +1,7 @@
 generator client {
   provider = "prisma-client-js"
-  // Generate next to apps/api's @prisma/client so the API TypeScript project resolves full types.
-  output   = "../../../apps/api/node_modules/.prisma/client"
+  // Standalone EdiMartApi deploy: must stay under this repo's node_modules (not monorepo path).
+  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {
