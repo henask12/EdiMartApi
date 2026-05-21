@@ -44,8 +44,15 @@ export class SalesController {
     @Query("format") format?: string,
     @Query("from") from?: string,
     @Query("to") to?: string,
+    @Query("productId") productId?: string,
+    @Query("categoryId") categoryId?: string,
   ) {
-    const result = await this.sales.exportSales(parseExportFormat(format), { from, to });
+    const result = await this.sales.exportSales(parseExportFormat(format), {
+      from,
+      to,
+      productId,
+      categoryId,
+    });
     sendExport(res, result);
   }
 
@@ -56,12 +63,16 @@ export class SalesController {
     @Query("take") take?: string,
     @Query("from") from?: string,
     @Query("to") to?: string,
+    @Query("productId") productId?: string,
+    @Query("categoryId") categoryId?: string,
   ) {
     return this.sales.listSales({
       skip: skip ? Number(skip) : undefined,
       take: take ? Number(take) : undefined,
       from,
       to,
+      productId,
+      categoryId,
     });
   }
 

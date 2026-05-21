@@ -53,6 +53,18 @@ type Authed = { user: { userId: string } };
 export class InventoryController {
   constructor(private readonly inventory: InventoryService) {}
 
+  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @Get("expiry")
+  listExpiry(
+    @Query("status") status?: "expiring" | "expired" | "all",
+    @Query("days") days?: string,
+  ) {
+    return this.inventory.listExpiry({
+      status: status ?? "all",
+      days: days ? Number(days) : undefined,
+    });
+  }
+
   @Get("movements")
   listMovements(
     @Query("productId") productId?: string,

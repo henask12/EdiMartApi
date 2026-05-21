@@ -1,20 +1,28 @@
-/** Parse YYYY-MM-DD as start of local day. */
+/** Parse YYYY-MM-DD as start of local calendar day. */
 export const parseDateStart = (value: string): Date => {
-  const d = new Date(value);
+  const parts = value.split("-").map(Number);
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) {
+    throw new Error("Invalid date");
+  }
+  const [year, month, day] = parts;
+  const d = new Date(year, month - 1, day, 0, 0, 0, 0);
   if (Number.isNaN(d.getTime())) {
     throw new Error("Invalid date");
   }
-  d.setHours(0, 0, 0, 0);
   return d;
 };
 
-/** Parse YYYY-MM-DD as end of local day (inclusive). */
+/** Parse YYYY-MM-DD as end of local calendar day (inclusive). */
 export const parseDateEnd = (value: string): Date => {
-  const d = new Date(value);
+  const parts = value.split("-").map(Number);
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) {
+    throw new Error("Invalid date");
+  }
+  const [year, month, day] = parts;
+  const d = new Date(year, month - 1, day, 23, 59, 59, 999);
   if (Number.isNaN(d.getTime())) {
     throw new Error("Invalid date");
   }
-  d.setHours(23, 59, 59, 999);
   return d;
 };
 

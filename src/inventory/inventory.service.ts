@@ -9,6 +9,7 @@ import { LocationsService } from "../locations/locations.service";
 import { AuditService } from "../audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { buildCreatedAtRange } from "../common/date-range.util";
+import { productStockSnapshot } from "../common/stock.util";
 import { ExportService, type ExportColumn } from "../export/export.service";
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
@@ -129,6 +130,97 @@ export class InventoryService {
     return this.exportService.build(format, `stock-history-${Date.now()}`, columns, rows);
   }
 
+  async listExpiry(params: { status?: "expiring" | "expired" | "all"; days?: number }) {
+    const days = params.days ?? 7;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const until = new Date(today);
+    until.setDate(until.getDate() + days);
+    until.setHours(23, 59, 59, 999);
+
+    const status = params.status ?? "all";
+    const batchWhere: Prisma.StockBatchWhereInput = {
+      qtyRemaining: { gt: 0 },
+      expiryDate: { not: null },
+    };
+    if (status === "expired") {
+      batchWhere.expiryDate = { lt: today };
+    } else if (status === "expiring") {
+      batchWhere.expiryDate = { gte: today, lte: until };
+    }
+
+    const batches = await this.prisma.stockBatch.findMany({
+      where: batchWhere,
+      include: { product: { include: { category: true } } },
+      orderBy: { expiryDate: "asc" },
+      take: 500,
+    });
+
+    const defaultLoc = await this.locations.getDefault();
+    const productWhere: Prisma.ProductWhereInput = {
+      isActive: true,
+      expiryDate: { not: null },
+      inventoryItems: { some: { locationId: defaultLoc.id, quantityOnHand: { gt: 0 } } },
+    };
+    if (status === "expired") {
+      productWhere.expiryDate = { lt: today };
+    } else if (status === "expiring") {
+      productWhere.expiryDate = { gte: today, lte: until };
+    }
+
+    const productsWithExpiry = await this.prisma.product.findMany({
+      where: productWhere,
+      include: { category: true },
+      orderBy: { expiryDate: "asc" },
+      take: 200,
+    });
+
+    const batchProductIds = new Set(batches.map((b) => b.productId));
+    const productOnly = productsWithExpiry.filter((p) => !batchProductIds.has(p.id));
+
+    const dayMs = 86400000;
+    const mapBatch = (b: (typeof batches)[0]) => {
+      const exp = b.expiryDate!;
+      const daysLeft = Math.ceil((exp.getTime() - today.getTime()) / dayMs);
+      return {
+        id: b.id,
+        source: "batch" as const,
+        productId: b.product.id,
+        productName: b.product.name,
+        categoryName: b.product.category.name,
+        qtyRemaining: b.qtyRemaining.toString(),
+        expiryDate: exp.toISOString().slice(0, 10),
+        daysLeft,
+        status: daysLeft < 0 ? ("expired" as const) : daysLeft <= days ? ("expiring" as const) : ("ok" as const),
+      };
+    };
+
+    const mapProduct = async (p: (typeof productOnly)[0]) => {
+      const exp = p.expiryDate!;
+      const daysLeft = Math.ceil((exp.getTime() - today.getTime()) / dayMs);
+      const { available } = await productStockSnapshot(this.prisma, p.id, defaultLoc.id);
+      return {
+        id: `product-${p.id}`,
+        source: "product" as const,
+        productId: p.id,
+        productName: p.name,
+        categoryName: p.category.name,
+        qtyRemaining: available.toString(),
+        expiryDate: exp.toISOString().slice(0, 10),
+        daysLeft,
+        status: daysLeft < 0 ? ("expired" as const) : daysLeft <= days ? ("expiring" as const) : ("ok" as const),
+      };
+    };
+
+    const batchItems = batches.map(mapBatch);
+    const productItems = await Promise.all(productOnly.map(mapProduct));
+    const items = [...batchItems, ...productItems].sort(
+      (a, b) => a.expiryDate.localeCompare(b.expiryDate) || a.productName.localeCompare(b.productName),
+    );
+
+    return { items, total: items.length, days };
+  }
+
   listBatches(productId: string, params?: { skip?: number; take?: number }) {
     if (!productId) {
       throw new BadRequestException("productId is required");
@@ -156,6 +248,16 @@ export class InventoryService {
       notes?: string;
     },
   ) {
+    let resolvedExpiryStr = data.expiryDate;
+    if (!resolvedExpiryStr) {
+      const product = await this.prisma.product.findUnique({
+        where: { id: data.productId },
+        select: { expiryDate: true },
+      });
+      if (product?.expiryDate) {
+        resolvedExpiryStr = product.expiryDate.toISOString().slice(0, 10);
+      }
+    }
     const qty = toDecimal(data.quantity);
     if (qty.lte(0)) {
       throw new BadRequestException("Quantity must be positive");
@@ -177,7 +279,7 @@ export class InventoryService {
       throw new NotFoundException("Inventory row not found for product");
     }
 
-    const expiryDate = data.expiryDate ? new Date(data.expiryDate) : null;
+    const expiryDate = resolvedExpiryStr ? new Date(resolvedExpiryStr) : null;
     if (expiryDate && Number.isNaN(expiryDate.getTime())) {
       throw new BadRequestException("Invalid expiry date");
     }

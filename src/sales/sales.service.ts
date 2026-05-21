@@ -36,17 +36,32 @@ export class SalesService {
   private mapSale(
     sale: Prisma.SaleGetPayload<{
       include: {
-        lines: { include: { product: true } };
+        lines: { include: { product: { include: { category: true } } } };
         createdBy: { select: { id: true; displayName: true; email: true } };
         attachments: true;
       };
     }>,
   ) {
+    const { lines, attachments, grandTotal, subtotal, ...rest } = sale;
     return {
-      ...sale,
-      grandTotal: sale.grandTotal.toFixed(2),
-      subtotal: sale.subtotal.toFixed(2),
-      attachments: sale.attachments.map((a) => ({
+      ...rest,
+      grandTotal: grandTotal.toFixed(2),
+      subtotal: subtotal.toFixed(2),
+      lines: lines.map((l) => ({
+        id: l.id,
+        quantity: l.quantity.toString(),
+        unitPrice: l.unitPrice.toFixed(2),
+        lineTotal: l.lineTotal.toFixed(2),
+        product: {
+          id: l.product.id,
+          name: l.product.name,
+          category: {
+            id: l.product.category.id,
+            name: l.product.category.name,
+          },
+        },
+      })),
+      attachments: attachments.map((a) => ({
         id: a.id,
         imagePath: a.imagePath,
         imageUrl: `${apiBase()}${a.imagePath}`,
@@ -55,14 +70,40 @@ export class SalesService {
     };
   }
 
-  async listSales(params: { skip?: number; take?: number; from?: string; to?: string }) {
-    const take = Math.min(params.take ?? 50, 200);
-    const skip = params.skip ?? 0;
+  private buildSalesWhere(params: {
+    from?: string;
+    to?: string;
+    productId?: string;
+    categoryId?: string;
+  }): Prisma.SaleWhereInput {
     const where: Prisma.SaleWhereInput = {};
     const createdAt = buildCreatedAtRange(params.from, params.to);
     if (createdAt) {
       where.createdAt = createdAt;
     }
+    if (params.productId && params.categoryId) {
+      where.lines = {
+        some: { productId: params.productId, product: { categoryId: params.categoryId } },
+      };
+    } else if (params.productId) {
+      where.lines = { some: { productId: params.productId } };
+    } else if (params.categoryId) {
+      where.lines = { some: { product: { categoryId: params.categoryId } } };
+    }
+    return where;
+  }
+
+  async listSales(params: {
+    skip?: number;
+    take?: number;
+    from?: string;
+    to?: string;
+    productId?: string;
+    categoryId?: string;
+  }) {
+    const take = Math.min(params.take ?? 50, 200);
+    const skip = params.skip ?? 0;
+    const where = this.buildSalesWhere(params);
     const [items, total] = await Promise.all([
       this.prisma.sale.findMany({
         where,
@@ -70,7 +111,7 @@ export class SalesService {
         take,
         orderBy: { createdAt: "desc" },
         include: {
-          lines: { include: { product: true } },
+          lines: { include: { product: { include: { category: true } } } },
           createdBy: { select: { id: true, displayName: true, email: true } },
           attachments: true,
         },
@@ -89,7 +130,7 @@ export class SalesService {
     const sale = await this.prisma.sale.findUnique({
       where: { id },
       include: {
-        lines: { include: { product: true } },
+        lines: { include: { product: { include: { category: true } } } },
         createdBy: { select: { id: true, displayName: true, email: true } },
         attachments: true,
         payments: true,
@@ -103,25 +144,36 @@ export class SalesService {
 
   async exportSales(
     format: "csv" | "xlsx" | "pdf",
-    params: { from?: string; to?: string },
+    params: { from?: string; to?: string; productId?: string; categoryId?: string },
   ) {
     const { items } = await this.listSales({ ...params, skip: 0, take: 5000 });
     const columns: ExportColumn[] = [
-      { header: "Sale #", key: "saleNumber" },
       { header: "Date", key: "date" },
-      { header: "Total", key: "total" },
-      { header: "Items", key: "items" },
+      { header: "Product", key: "product" },
+      { header: "Category", key: "category" },
+      { header: "Quantity", key: "quantity" },
+      { header: "Unit price", key: "unitPrice" },
+      { header: "Line total", key: "lineTotal" },
+      { header: "Sale #", key: "saleNumber" },
       { header: "Cashier", key: "cashier" },
     ];
-    const rows = items.map((s) => ({
-      saleNumber: s.saleNumber,
-      date: s.createdAt.toISOString().slice(0, 16).replace("T", " "),
-      total: s.grandTotal,
-      items: s.lines
-        .map((l) => `${l.product.name} x${l.quantity.toString()}`)
-        .join("; "),
-      cashier: s.createdBy.displayName ?? s.createdBy.email,
-    }));
+    const rows: Record<string, string>[] = [];
+    for (const s of items) {
+      const date = s.createdAt.toISOString().slice(0, 16).replace("T", " ");
+      const cashier = s.createdBy.displayName ?? s.createdBy.email;
+      for (const l of s.lines) {
+        rows.push({
+          date,
+          product: l.product.name,
+          category: l.product.category.name,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          lineTotal: l.lineTotal,
+          saleNumber: s.saleNumber,
+          cashier,
+        });
+      }
+    }
     return this.exportService.build(format, `sales-${Date.now()}`, columns, rows);
   }
 

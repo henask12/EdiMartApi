@@ -58,6 +58,10 @@ export class CreateProductDto {
   @IsOptional()
   @IsString()
   initialExpiryDate?: string;
+
+  @IsOptional()
+  @IsString()
+  expiryDate?: string;
 }
 
 export class UpdateProductDto {
@@ -109,4 +113,8 @@ export class UpdateProductDto {
   @IsOptional()
   @IsString()
   originCountry?: string;
+
+  @IsOptional()
+  @IsString()
+  expiryDate?: string | null;
 }

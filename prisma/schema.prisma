@@ -1,6 +1,7 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../node_modules/.prisma/client"
+  // Generate next to apps/api's @prisma/client so the API TypeScript project resolves full types.
+  output   = "../../../apps/api/node_modules/.prisma/client"
 }
 
 datasource db {
@@ -132,6 +133,7 @@ model Product {
   costPrice     Decimal           @db.Decimal(12, 2) @default(0)
   restockAt     Int               @default(0)
   restockQty    Int               @default(0)
+  expiryDate    DateTime?
   isActive      Boolean           @default(true)
   lastOutOfStockAlertAt DateTime?
   createdAt     DateTime          @default(now())

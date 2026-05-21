@@ -219,6 +219,7 @@ export class CatalogService {
       originCountry?: string;
       initialQuantity?: string;
       initialExpiryDate?: string;
+      expiryDate?: string;
     },
   ) {
     const name = data.name.trim();
@@ -259,6 +260,7 @@ export class CatalogService {
           costPrice: cost,
           restockAt: data.restockAt ?? 0,
           restockQty: data.restockQty ?? 0,
+          expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
         },
       });
       await tx.inventoryItem.create({
@@ -279,7 +281,7 @@ export class CatalogService {
         productId: product.id,
         quantity: initialQty.toString(),
         unitCost: cost.toString(),
-        expiryDate: data.initialExpiryDate,
+        expiryDate: data.initialExpiryDate ?? data.expiryDate,
         notes: "Opening stock",
       });
     }
@@ -302,6 +304,7 @@ export class CatalogService {
       imagePath: string;
       description: string;
       originCountry: string;
+      expiryDate: string | null;
     }>,
   ) {
     const existing = await this.ensureProduct(id);
@@ -349,6 +352,12 @@ export class CatalogService {
         restockAt: data.restockAt,
         restockQty: data.restockQty,
         isActive: data.isActive,
+        expiryDate:
+          data.expiryDate !== undefined
+            ? data.expiryDate
+              ? new Date(data.expiryDate)
+              : null
+            : undefined,
       },
     });
     await this.audit.log(userId, "UPDATE", "Product", id, { name: data.name });
