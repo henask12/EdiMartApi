@@ -47,20 +47,28 @@ export class SalesService {
       ...rest,
       grandTotal: grandTotal.toFixed(2),
       subtotal: subtotal.toFixed(2),
-      lines: lines.map((l) => ({
-        id: l.id,
-        quantity: l.quantity.toString(),
-        unitPrice: l.unitPrice.toFixed(2),
-        lineTotal: l.lineTotal.toFixed(2),
-        product: {
-          id: l.product.id,
-          name: l.product.name,
-          category: {
-            id: l.product.category.id,
-            name: l.product.category.name,
+      lines: lines.map((l) => {
+        const unitCost = l.unitCostAtSale.toFixed(2);
+        const qty = l.quantity;
+        const costTotal = l.unitCostAtSale.mul(qty);
+        const netProfit = l.lineTotal.sub(costTotal).toFixed(2);
+        return {
+          id: l.id,
+          quantity: qty.toString(),
+          unitPrice: l.unitPrice.toFixed(2),
+          lineTotal: l.lineTotal.toFixed(2),
+          unitCostAtSale: unitCost,
+          netProfit,
+          product: {
+            id: l.product.id,
+            name: l.product.name,
+            category: {
+              id: l.product.category.id,
+              name: l.product.category.name,
+            },
           },
-        },
-      })),
+        };
+      }),
       attachments: attachments.map((a) => ({
         id: a.id,
         imagePath: a.imagePath,
@@ -148,14 +156,15 @@ export class SalesService {
   ) {
     const { items } = await this.listSales({ ...params, skip: 0, take: 5000 });
     const columns: ExportColumn[] = [
-      { header: "Date", key: "date" },
-      { header: "Product", key: "product" },
+      { header: "Sales date", key: "date" },
+      { header: "Item", key: "product" },
       { header: "Category", key: "category" },
-      { header: "Quantity", key: "quantity" },
-      { header: "Unit price", key: "unitPrice" },
-      { header: "Line total", key: "lineTotal" },
-      { header: "Sale #", key: "saleNumber" },
       { header: "Cashier", key: "cashier" },
+      { header: "Unit price", key: "unitPrice" },
+      { header: "Quantity", key: "quantity" },
+      { header: "Total price", key: "lineTotal" },
+      { header: "Net profit", key: "netProfit" },
+      { header: "Sale #", key: "saleNumber" },
     ];
     const rows: Record<string, string>[] = [];
     for (const s of items) {
@@ -169,6 +178,7 @@ export class SalesService {
           quantity: l.quantity,
           unitPrice: l.unitPrice,
           lineTotal: l.lineTotal,
+          netProfit: l.netProfit,
           saleNumber: s.saleNumber,
           cashier,
         });
@@ -197,6 +207,7 @@ export class SalesService {
       quantity: Prisma.Decimal;
       unitPrice: Prisma.Decimal;
       lineTotal: Prisma.Decimal;
+      unitCostAtSale: Prisma.Decimal;
       reservationId?: string;
     }> = [];
 
@@ -209,6 +220,16 @@ export class SalesService {
       if (qty.lte(0)) {
         throw new BadRequestException("Quantity must be positive");
       }
+
+      const inv = await this.prisma.inventoryItem.findUnique({
+        where: {
+          productId_locationId: { productId: line.productId, locationId: defaultLoc.id },
+        },
+      });
+      if (!inv) {
+        throw new NotFoundException(`No inventory for ${product.name}`);
+      }
+      const unitCostAtSale = inv.averageCost;
 
       if (line.reservationId) {
         const reservation = await this.prisma.reservation.findUnique({
@@ -248,6 +269,7 @@ export class SalesService {
         quantity: qty,
         unitPrice: product.sellingPrice,
         lineTotal,
+        unitCostAtSale,
         reservationId: line.reservationId,
       });
     }
@@ -285,6 +307,7 @@ export class SalesService {
                 productId: l.productId,
                 quantity: l.quantity,
                 unitPrice: l.unitPrice,
+                unitCostAtSale: l.unitCostAtSale,
                 lineDiscount: 0,
                 taxAmount: 0,
                 lineTotal: l.lineTotal,
@@ -333,6 +356,15 @@ export class SalesService {
           });
 
           if (line.reservationId) {
+            const reservation = await tx.reservation.findUniqueOrThrow({
+              where: { id: line.reservationId },
+            });
+            const { available: availBefore } = await productStockSnapshot(
+              tx,
+              line.productId,
+              defaultLoc.id,
+            );
+            const availAfter = availBefore.add(line.quantity);
             await tx.reservation.update({
               where: { id: line.reservationId },
               data: { status: ReservationStatus.COMPLETED },
@@ -342,10 +374,19 @@ export class SalesService {
                 inventoryItemId: inv.id,
                 type: MovementType.RELEASE_RESERVE,
                 qtyDelta: line.quantity.mul(new Prisma.Decimal(-1)),
+                beforeOnHand: afterOnHand,
+                afterOnHand: afterOnHand,
                 refType: "RESERVATION",
                 refId: line.reservationId,
                 createdByUserId: userId,
-                metadata: { reservationId: line.reservationId, fulfilledBySale: sale.id },
+                metadata: {
+                  reservationId: line.reservationId,
+                  fulfilledBySale: sale.id,
+                  reservedQty: line.quantity.neg().toString(),
+                  availableBefore: availBefore.toString(),
+                  availableAfter: availAfter.toString(),
+                  customerName: reservation.customerName,
+                },
               },
             });
           }

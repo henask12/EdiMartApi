@@ -1,7 +1,7 @@
 generator client {
   provider = "prisma-client-js"
-  // Standalone EdiMartApi deploy: must stay under this repo's node_modules (not monorepo path).
-  output   = "../node_modules/.prisma/client"
+  // Generated into apps/api — run `pnpm db:generate` from repo root after schema changes.
+  output   = "../../../apps/api/node_modules/.prisma/client"
 }
 
 datasource db {
@@ -260,9 +260,10 @@ model SaleLine {
   sale         Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
   productId    String
   product      Product  @relation(fields: [productId], references: [id])
-  quantity     Decimal  @db.Decimal(18, 4)
-  unitPrice    Decimal  @db.Decimal(12, 2)
-  lineDiscount Decimal  @db.Decimal(12, 2) @default(0)
+  quantity       Decimal  @db.Decimal(18, 4)
+  unitPrice      Decimal  @db.Decimal(12, 2)
+  unitCostAtSale Decimal  @db.Decimal(14, 4) @default(0)
+  lineDiscount   Decimal  @db.Decimal(12, 2) @default(0)
   taxAmount    Decimal  @db.Decimal(12, 2) @default(0)
   lineTotal    Decimal  @db.Decimal(12, 2)
 }

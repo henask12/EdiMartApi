@@ -14,6 +14,21 @@ import { ExportService, type ExportColumn } from "../export/export.service";
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
 
+type MovementListRow = Prisma.StockMovementGetPayload<{
+  include: {
+    inventoryItem: { include: { product: { include: { category: true } }; location: true } };
+    stockBatch: true;
+    createdBy: { select: { id: true; email: true; displayName: true } };
+  };
+}>;
+
+type ReservationMeta = {
+  reservedQty?: string;
+  availableBefore?: string;
+  availableAfter?: string;
+  customerName?: string | null;
+};
+
 @Injectable()
 export class InventoryService {
   constructor(
@@ -45,7 +60,7 @@ export class InventoryService {
     if (createdAt) {
       where.createdAt = createdAt;
     }
-    const [items, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       this.prisma.stockMovement.findMany({
         where,
         orderBy: { createdAt: "desc" },
@@ -59,7 +74,78 @@ export class InventoryService {
       }),
       this.prisma.stockMovement.count({ where }),
     ]);
+    const items = await this.mapMovementList(rows);
     return { items, total, skip, take };
+  }
+
+  private parseReservationMeta(metadata: Prisma.JsonValue | null): ReservationMeta | null {
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      return null;
+    }
+    const m = metadata as Record<string, unknown>;
+    return {
+      reservedQty: typeof m.reservedQty === "string" ? m.reservedQty : undefined,
+      availableBefore: typeof m.availableBefore === "string" ? m.availableBefore : undefined,
+      availableAfter: typeof m.availableAfter === "string" ? m.availableAfter : undefined,
+      customerName:
+        typeof m.customerName === "string" || m.customerName === null
+          ? (m.customerName as string | null)
+          : undefined,
+    };
+  }
+
+  private async mapMovementList(rows: MovementListRow[]) {
+    const reservationIds = [
+      ...new Set(
+        rows
+          .filter((m) => m.refType === "RESERVATION" && m.refId)
+          .map((m) => m.refId as string),
+      ),
+    ];
+    const reservations =
+      reservationIds.length > 0
+        ? await this.prisma.reservation.findMany({
+            where: { id: { in: reservationIds } },
+            select: { id: true, quantity: true, customerName: true },
+          })
+        : [];
+    const reservationById = new Map(reservations.map((r) => [r.id, r]));
+
+    return rows.map((m) => {
+      const batch = m.stockBatch;
+      const meta = this.parseReservationMeta(m.metadata);
+      const reservation =
+        m.refType === "RESERVATION" && m.refId ? reservationById.get(m.refId) : undefined;
+      return {
+        id: m.id,
+        type: m.type,
+        qtyDelta: m.qtyDelta.toString(),
+        beforeOnHand: m.beforeOnHand?.toString() ?? null,
+        afterOnHand: m.afterOnHand?.toString() ?? null,
+        createdAt: m.createdAt,
+        notes: m.notes,
+        refType: m.refType,
+        refId: m.refId,
+        inventoryItem: m.inventoryItem,
+        stockBatch: batch
+          ? {
+              ...batch,
+              qtyReceived: batch.qtyReceived.toString(),
+              qtyRemaining: batch.qtyRemaining.toString(),
+              unitCost: batch.unitCost.toString(),
+            }
+          : null,
+        createdBy: m.createdBy,
+        reservation: reservation
+          ? {
+              id: reservation.id,
+              quantity: reservation.quantity.toString(),
+              customerName: reservation.customerName,
+            }
+          : null,
+        reservationMeta: meta,
+      };
+    });
   }
 
   async getMovement(id: string) {
@@ -79,21 +165,10 @@ export class InventoryService {
     if (!movement) {
       throw new NotFoundException("Stock movement not found");
     }
-    const batch = movement.stockBatch;
+    const [mapped] = await this.mapMovementList([movement]);
     return {
-      ...movement,
-      qtyDelta: movement.qtyDelta.toString(),
-      beforeOnHand: movement.beforeOnHand?.toString() ?? null,
-      afterOnHand: movement.afterOnHand?.toString() ?? null,
+      ...mapped,
       unitCost: movement.unitCost?.toString() ?? null,
-      stockBatch: batch
-        ? {
-            ...batch,
-            qtyReceived: batch.qtyReceived.toString(),
-            qtyRemaining: batch.qtyRemaining.toString(),
-            unitCost: batch.unitCost.toString(),
-          }
-        : null,
     };
   }
 

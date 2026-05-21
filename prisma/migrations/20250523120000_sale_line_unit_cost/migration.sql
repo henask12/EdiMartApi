@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "SaleLine" ADD COLUMN "unitCostAtSale" DECIMAL(14,4) NOT NULL DEFAULT 0;
