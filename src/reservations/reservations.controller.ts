@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
-import { ReservationStatus } from ".prisma/client";
+import { ReservationStatus } from "@prisma/client";
 import { CASHIER_ROLE, OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import { IsEnum, IsOptional, IsString } from "class-validator";
 import { Roles } from "../common/decorators/roles.decorator";

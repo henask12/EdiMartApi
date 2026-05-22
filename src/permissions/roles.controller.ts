@@ -8,7 +8,7 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
-import { PermissionKey } from ".prisma/client";
+import { PermissionKey } from "@prisma/client";
 import { IsArray, IsEnum, IsOptional, IsString, MinLength } from "class-validator";
 import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { PermissionsService } from "./permissions.service";

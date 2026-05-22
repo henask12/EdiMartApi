@@ -5,7 +5,7 @@ import {
   Injectable,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { PermissionKey } from ".prisma/client";
+import { PermissionKey } from "@prisma/client";
 import { isOwnerRoleName } from "../role.constants";
 import { PERMISSIONS_KEY } from "../decorators/permissions.decorator";
 

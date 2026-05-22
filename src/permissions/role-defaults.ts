@@ -1,4 +1,4 @@
-import { PermissionKey } from ".prisma/client";
+import { PermissionKey } from "@prisma/client";
 import {
   CASHIER_ROLE,
   ONLINE_MANAGER_ROLE,

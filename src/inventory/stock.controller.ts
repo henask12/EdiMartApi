@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, Req, Res } from "@nestjs/common";
-import { MovementType } from ".prisma/client";
+import { MovementType } from "@prisma/client";
 import { OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import type { Response } from "express";
 import { IsOptional, IsString } from "class-validator";

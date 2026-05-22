@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
-import { PermissionKey } from ".prisma/client";
+import { PermissionKey } from "@prisma/client";
 import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { IsBoolean, IsEmail, IsOptional, IsString, MinLength } from "class-validator";
 import { UsersService } from "./users.service";

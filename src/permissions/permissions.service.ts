@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { PermissionKey } from ".prisma/client";
+import { PermissionKey } from "@prisma/client";
 import { CASHIER_ROLE, isOwnerRoleName, OWNER_ROLE } from "../common/role.constants";
 import { ALL_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from "./role-defaults";
 import { PrismaService } from "../prisma/prisma.service";

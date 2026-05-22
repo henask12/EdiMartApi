@@ -1,7 +1,7 @@
 generator client {
   provider = "prisma-client-js"
-  // Generated into apps/api — run `pnpm db:generate` from repo root after schema changes.
-  output   = "../../../apps/api/node_modules/.prisma/client"
+  // Standalone Render build — must generate into this repo's node_modules.
+  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {
