@@ -1,0 +1,53 @@
+{
+  "name": "@edisims/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "generate": "prisma generate --schema=../../packages/database/prisma/schema.prisma",
+    "postinstall": "prisma generate --schema=../../packages/database/prisma/schema.prisma",
+    "prebuild": "pnpm run generate",
+    "prestart:dev": "pnpm run generate",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "start:dev": "nest start --watch",
+    "start:debug": "nest start --debug --watch"
+  },
+  "dependencies": {
+    "@edisims/database": "workspace:*",
+    "@prisma/client": "^6.3.1",
+    "@nestjs/common": "^11.0.8",
+    "@nestjs/config": "^4.0.0",
+    "@nestjs/core": "^11.0.8",
+    "@nestjs/jwt": "^11.0.0",
+    "@nestjs/passport": "^11.0.5",
+    "@nestjs/platform-express": "^11.0.8",
+    "@nestjs/schedule": "^5.0.1",
+    "bcryptjs": "^2.4.3",
+    "multer": "^1.4.5-lts.1",
+    "resend": "^4.1.2",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "cookie-parser": "^1.4.7",
+    "exceljs": "^4.4.0",
+    "pdfkit": "^0.16.0",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "prisma": "^6.3.1",
+    "@nestjs/cli": "^11.0.2",
+    "@nestjs/schematics": "^11.0.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cookie-parser": "^1.4.8",
+    "@types/express": "^5.0.0",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.10.7",
+    "@types/passport-jwt": "^4.0.1",
+    "@types/pdfkit": "^0.13.9",
+    "eslint": "^9.18.0",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.21.0"
+  }
+}
