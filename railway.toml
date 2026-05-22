@@ -1,0 +1,13 @@
+# Railway deploy config for EdiMartApi
+# Set on EdiMartApi service Variables (see README.md):
+#   DATABASE_URL (reference from Postgres) + JWT_SECRET
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "node scripts/railway-start.js"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 5

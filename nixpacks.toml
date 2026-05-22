@@ -1,0 +1,12 @@
+# Node 20+ — global `crypto` required by @nestjs/schedule (Node 18 fails on Railway).
+[variables]
+NIXPACKS_NODE_VERSION = "20"
+
+[phases.install]
+cmds = ["npm install --include=dev"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "node scripts/railway-start.js"
