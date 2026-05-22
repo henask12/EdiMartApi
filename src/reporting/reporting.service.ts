@@ -77,10 +77,26 @@ export class ReportingService {
     }
 
     return {
-      today,
-      week: { grandTotal: week.grandTotal, saleCount: week.saleCount },
-      month: { grandTotal: month.grandTotal, saleCount: month.saleCount },
-      year: { grandTotal: year.grandTotal, saleCount: year.saleCount },
+      today: {
+        grandTotal: today.grandTotal,
+        saleCount: today.saleCount,
+        netProfit: today.netProfit,
+      },
+      week: {
+        grandTotal: week.grandTotal,
+        saleCount: week.saleCount,
+        netProfit: week.netProfit,
+      },
+      month: {
+        grandTotal: month.grandTotal,
+        saleCount: month.saleCount,
+        netProfit: month.netProfit,
+      },
+      year: {
+        grandTotal: year.grandTotal,
+        saleCount: year.saleCount,
+        netProfit: year.netProfit,
+      },
       needsRestock,
       expiringSoon: expiringSoon.map((b) => ({
         id: b.id,

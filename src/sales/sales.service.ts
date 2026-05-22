@@ -14,6 +14,18 @@ import { ExportService, type ExportColumn } from "../export/export.service";
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
 
+type SaleLineForProfit = {
+  quantity: Prisma.Decimal;
+  lineTotal: Prisma.Decimal;
+  unitCostAtSale: Prisma.Decimal;
+  product: { costPrice: Prisma.Decimal };
+};
+
+const lineNetProfit = (line: SaleLineForProfit) => {
+  const unitCost = line.unitCostAtSale.gt(0) ? line.unitCostAtSale : line.product.costPrice;
+  return line.lineTotal.sub(unitCost.mul(line.quantity));
+};
+
 const apiBase = () =>
   (process.env.PUBLIC_API_URL ?? "http://127.0.0.1:4000").replace(/\/$/, "");
 
@@ -48,10 +60,9 @@ export class SalesService {
       grandTotal: grandTotal.toFixed(2),
       subtotal: subtotal.toFixed(2),
       lines: lines.map((l) => {
-        const unitCost = l.unitCostAtSale.toFixed(2);
+        const unitCost = (l.unitCostAtSale.gt(0) ? l.unitCostAtSale : l.product.costPrice).toFixed(2);
         const qty = l.quantity;
-        const costTotal = l.unitCostAtSale.mul(qty);
-        const netProfit = l.lineTotal.sub(costTotal).toFixed(2);
+        const netProfit = lineNetProfit(l).toFixed(2);
         return {
           id: l.id,
           quantity: qty.toString(),
@@ -427,9 +438,11 @@ export class SalesService {
       include: { lines: { include: { product: true } } },
     });
     const total = sales.reduce((a, s) => a.add(s.grandTotal), new Prisma.Decimal(0));
+    let netProfitTotal = new Prisma.Decimal(0);
     const productQty = new Map<string, { name: string; qty: Prisma.Decimal; revenue: Prisma.Decimal }>();
     for (const sale of sales) {
       for (const line of sale.lines) {
+        netProfitTotal = netProfitTotal.add(lineNetProfit(line));
         const key = line.productId;
         const prev = productQty.get(key) ?? {
           name: line.product.name,
@@ -456,6 +469,7 @@ export class SalesService {
       end: range.end.toISOString(),
       saleCount: sales.length,
       grandTotal: total.toFixed(2),
+      netProfit: netProfitTotal.toFixed(2),
       topProducts,
     };
   }

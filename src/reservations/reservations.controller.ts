@@ -65,6 +65,12 @@ export class ReservationsController {
   }
 
   @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @Post(":id/update")
+  updatePost(@Req() req: Authed, @Param("id") id: string, @Body() body: UpdateReservationDto) {
+    return this.reservations.update(req.user.userId, id, body);
+  }
+
+  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @Post(":id/cancel")
   cancel(@Req() req: Authed, @Param("id") id: string) {
     return this.reservations.cancel(req.user.userId, id);

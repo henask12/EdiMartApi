@@ -214,14 +214,13 @@ export class ReservationsService {
         ? data.customerName.trim() || null
         : reservation.customerName;
 
-    const { onHand, available } = await productStockSnapshot(
+    const { onHand } = await productStockSnapshot(
       this.prisma,
       reservation.productId,
       defaultLoc.id,
     );
-    const maxQty = available.add(oldQty);
-    if (newQty.gt(maxQty)) {
-      throw new BadRequestException("Not enough available stock for this quantity");
+    if (newQty.gt(onHand)) {
+      throw new BadRequestException(`Quantity cannot exceed on hand (${onHand.toString()})`);
     }
 
     const qtyDelta = newQty.sub(oldQty);
@@ -237,8 +236,12 @@ export class ReservationsService {
       });
 
       if (!qtyDelta.eq(0)) {
-        const availBefore = available;
-        const availAfter = available.sub(newQty.sub(oldQty));
+        const { available: availBefore } = await productStockSnapshot(
+          tx,
+          reservation.productId,
+          defaultLoc.id,
+        );
+        const availAfter = availBefore.sub(qtyDelta);
         if (qtyDelta.gt(0)) {
           await tx.stockMovement.create({
             data: {
