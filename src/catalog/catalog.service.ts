@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { Prisma } from ".prisma/client";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { LocationsService } from "../locations/locations.service";
 import { AuditService } from "../audit/audit.service";
@@ -260,22 +260,21 @@ export class CatalogService {
     const defaultLoc = await this.locations.getDefault();
     const cost = toDecimal(data.costPrice ?? 0);
     const product = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.product.create({
-        data: {
-          sku: autoSku(name),
-          name,
-          categoryId: data.categoryId,
-          productTypeId: data.productTypeId ?? null,
-          imagePath: data.imagePath,
-          description: data.description?.trim() || null,
-          originCountry: data.originCountry?.trim() || null,
-          sellingPrice: toDecimal(data.sellingPrice),
-          costPrice: cost,
-          restockAt: data.restockAt ?? 0,
-          restockQty: data.restockQty ?? 0,
-          expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
-        },
-      });
+      const createData: Prisma.ProductUncheckedCreateInput = {
+        sku: autoSku(name),
+        name,
+        categoryId: data.categoryId,
+        productTypeId: data.productTypeId ?? null,
+        imagePath: data.imagePath,
+        description: data.description?.trim() || null,
+        originCountry: data.originCountry?.trim() || null,
+        sellingPrice: toDecimal(data.sellingPrice),
+        costPrice: cost,
+        restockAt: data.restockAt ?? 0,
+        restockQty: data.restockQty ?? 0,
+        expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
+      };
+      const created = await tx.product.create({ data: createData });
       await tx.inventoryItem.create({
         data: {
           productId: created.id,
@@ -347,29 +346,30 @@ export class CatalogService {
         throw new BadRequestException("A product with this name already exists in this category");
       }
     }
+    const updateData: Prisma.ProductUncheckedUpdateInput = {
+      name: data.name?.trim(),
+      categoryId: data.categoryId,
+      productTypeId:
+        data.productTypeId !== undefined ? data.productTypeId : undefined,
+      ...(data.imagePath !== undefined ? { imagePath: data.imagePath } : {}),
+      description: optionalTrimmedString(data.description),
+      originCountry: optionalTrimmedString(data.originCountry),
+      sellingPrice:
+        data.sellingPrice !== undefined ? toDecimal(data.sellingPrice) : undefined,
+      costPrice: data.costPrice !== undefined ? toDecimal(data.costPrice) : undefined,
+      restockAt: data.restockAt,
+      restockQty: data.restockQty,
+      isActive: data.isActive,
+      expiryDate:
+        data.expiryDate !== undefined
+          ? data.expiryDate
+            ? new Date(data.expiryDate)
+            : null
+          : undefined,
+    };
     await this.prisma.product.update({
       where: { id },
-      data: {
-        name: data.name?.trim(),
-        categoryId: data.categoryId,
-        productTypeId:
-          data.productTypeId !== undefined ? data.productTypeId : undefined,
-        ...(data.imagePath !== undefined ? { imagePath: data.imagePath } : {}),
-        description: optionalTrimmedString(data.description),
-        originCountry: optionalTrimmedString(data.originCountry),
-        sellingPrice:
-          data.sellingPrice !== undefined ? toDecimal(data.sellingPrice) : undefined,
-        costPrice: data.costPrice !== undefined ? toDecimal(data.costPrice) : undefined,
-        restockAt: data.restockAt,
-        restockQty: data.restockQty,
-        isActive: data.isActive,
-        expiryDate:
-          data.expiryDate !== undefined
-            ? data.expiryDate
-              ? new Date(data.expiryDate)
-              : null
-            : undefined,
-      },
+      data: updateData,
     });
     await this.audit.log(userId, "UPDATE", "Product", id, { name: data.name });
     return this.getProduct(id);
