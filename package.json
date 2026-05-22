@@ -6,13 +6,13 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "prisma generate && nest build",
-    "render:build": "prisma generate && nest build",
+    "build": "npx prisma generate && nest build",
+    "render:build": "npx prisma generate && nest build",
     "start": "node scripts/render-start.js",
     "start:node": "node dist/main.js",
     "start:prod": "prisma migrate deploy && node dist/main.js",
     "start:dev": "nest start --watch",
-    "postinstall": "prisma generate",
+    "postinstall": "npx prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts"
