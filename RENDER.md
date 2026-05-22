@@ -10,6 +10,8 @@ Open **Settings** and set exactly:
 | **Build Command** | `bash build.sh` |
 | **Start Command** | `npm start` |
 
+**Critical:** Do **not** use `yarn install; yarn build`. This repo is standalone (`edimart-api`) and uses **npm** + `package-lock.json`. Yarn will fail on `@edisims/database` if the monorepo `package.json` was ever pushed by mistake.
+
 ### Do NOT use
 
 - Root Directory = `src` ← this breaks the build

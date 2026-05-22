@@ -24,6 +24,7 @@ const findRepoRoot = () => {
 };
 
 const repoRoot = findRepoRoot();
+const prismaCli = `node ${path.join(repoRoot, "node_modules", "prisma", "build", "index.js")}`;
 const ROLE_STRING_MIGRATION = "20250520120000_role_name_string";
 
 const run = (cmd) => {
@@ -76,7 +77,7 @@ const clearFailedMigrations = (output) => {
   }
   for (const name of failed) {
     console.log(`Marking failed migration as rolled back: ${name}`);
-    const result = runCapture(`npx prisma migrate resolve --rolled-back "${name}"`);
+    const result = runCapture(`${prismaCli} migrate resolve --rolled-back "${name}"`);
     if (
       !result.ok &&
       !result.output.includes("already") &&
@@ -98,7 +99,7 @@ const baselineExistingSchema = () => {
       continue;
     }
     console.log(`Marking migration as applied: ${name}`);
-    const result = runCapture(`npx prisma migrate resolve --applied "${name}"`);
+    const result = runCapture(`${prismaCli} migrate resolve --applied "${name}"`);
     if (result.ok) {
       continue;
     }
@@ -121,7 +122,7 @@ const recoverMigrationHistory = (output) => {
 
 const applyMigrations = () => {
   console.log("Applying database migrations (prisma migrate deploy)...");
-  const first = runCapture("npx prisma migrate deploy");
+  const first = runCapture(`${prismaCli} migrate deploy`);
   if (first.ok) {
     return;
   }
@@ -136,7 +137,7 @@ const applyMigrations = () => {
   if (needsRecovery) {
     console.log("Recovering migration history, then deploying pending migrations…");
     recoverMigrationHistory(first.output);
-    const second = runCapture("npx prisma migrate deploy");
+    const second = runCapture(`${prismaCli} migrate deploy`);
     if (second.ok) {
       return;
     }
