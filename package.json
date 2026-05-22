@@ -3,11 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "generate": "prisma generate --schema=../../packages/database/prisma/schema.prisma",
-    "postinstall": "prisma generate --schema=../../packages/database/prisma/schema.prisma",
-    "prebuild": "pnpm run generate",
-    "prestart:dev": "pnpm run generate",
-    "build": "nest build",
+    "generate": "npx prisma generate --schema=../../packages/database/prisma/schema.prisma",
+    "prestart:dev": "npm run generate",
+    "build": "npm run generate && nest build",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch"
@@ -15,6 +13,7 @@
   "dependencies": {
     "@edisims/database": "workspace:*",
     "@prisma/client": "^6.3.1",
+    "prisma": "^6.3.1",
     "@nestjs/common": "^11.0.8",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.8",
@@ -36,7 +35,6 @@
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
-    "prisma": "^6.3.1",
     "@nestjs/cli": "^11.0.2",
     "@nestjs/schematics": "^11.0.0",
     "@types/bcryptjs": "^2.4.6",

@@ -7,13 +7,19 @@ Open **Settings** and set exactly:
 | Field | Value |
 |-------|--------|
 | **Root Directory** | *(delete everything — must be empty)* |
-| **Build Command** | `bash build.sh` |
-| **Start Command** | `npm start` |
+| **Build Command** | `bash build.sh` (monorepo root) or `bash apps/api/build.sh` |
+| **Start Command** | `npm start` (with Root Directory = `apps/api`) |
+
+### Monorepo on Render
+
+- **Root Directory** empty → **Build Command** `bash build.sh` → **Start Command** `cd apps/api && npm start`
+- **Root Directory** `apps/api` → **Build Command** `bash build.sh` → **Start Command** `npm start`
 
 ### Do NOT use
 
 - Root Directory = `src` ← this breaks the build
-- Start Command = `yarn start` ← use **npm** (`package-lock.json` is in the repo)
+- `yarn build` alone ← triggers `pnpm run generate` and can fail with `prisma: Permission denied`; use **bash build.sh** instead
+- Start Command = `yarn start` ← use **npm**
 
 ## Environment variables
 
