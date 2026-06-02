@@ -14,6 +14,7 @@ import { SalesModule } from "./sales/sales.module";
 import { ReservationsModule } from "./reservations/reservations.module";
 import { ReportingModule } from "./reporting/reporting.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { ExpensesModule } from "./expenses/expenses.module";
 import { UploadsModule } from "./uploads/uploads.module";
 import { LocationsModule } from "./locations/locations.module";
 import { HealthModule } from "./health/health.module";
@@ -43,6 +44,7 @@ import { PermissionsModule } from "./permissions/permissions.module";
     UploadsModule,
     InventoryModule,
     SalesModule,
+    ExpensesModule,
     ReservationsModule,
     ReportingModule,
     NotificationsModule,

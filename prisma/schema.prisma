@@ -26,6 +26,7 @@ enum PermissionKey {
   SALES_VIEW
   SALES_EXPORT
   RESERVATIONS_MANAGE
+  EXPENSES_MANAGE
   USERS_MANAGE
   ROLES_MANAGE
   SETTINGS_EMAILS
@@ -88,6 +89,7 @@ model User {
   sales           Sale[]           @relation("SaleCreatedBy")
   stockBatches    StockBatch[]
   reservations    Reservation[]
+  expenses        Expense[]         @relation("ExpenseCreatedBy")
 }
 
 model AuditLog {
@@ -296,4 +298,17 @@ model NotificationLog {
   body      String
   sentAt    DateTime         @default(now())
   metadata  Json?
+}
+
+model Expense {
+  id              String    @id @default(cuid())
+  detail          String
+  amount          Decimal   @db.Decimal(12, 2)
+  expenseDate     DateTime
+  createdByUserId String?
+  createdBy       User?     @relation("ExpenseCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([expenseDate])
 }

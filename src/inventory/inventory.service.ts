@@ -83,10 +83,15 @@ export class InventoryService {
       return null;
     }
     const m = metadata as Record<string, unknown>;
+    const asString = (value: unknown) => {
+      if (typeof value === "string") return value;
+      if (typeof value === "number") return String(value);
+      return undefined;
+    };
     return {
-      reservedQty: typeof m.reservedQty === "string" ? m.reservedQty : undefined,
-      availableBefore: typeof m.availableBefore === "string" ? m.availableBefore : undefined,
-      availableAfter: typeof m.availableAfter === "string" ? m.availableAfter : undefined,
+      reservedQty: asString(m.reservedQty),
+      availableBefore: asString(m.availableBefore),
+      availableAfter: asString(m.availableAfter),
       customerName:
         typeof m.customerName === "string" || m.customerName === null
           ? (m.customerName as string | null)

@@ -24,6 +24,7 @@ const staffPermissions: PermissionKey[] = [
   PermissionKey.SALES_VIEW,
   PermissionKey.SALES_EXPORT,
   PermissionKey.RESERVATIONS_MANAGE,
+  PermissionKey.EXPENSES_MANAGE,
   PermissionKey.REPORTING_VIEW,
 ];
 
@@ -37,6 +38,7 @@ const cashierPermissions: PermissionKey[] = [
   PermissionKey.SALES_VIEW,
   PermissionKey.SALES_EXPORT,
   PermissionKey.RESERVATIONS_MANAGE,
+  PermissionKey.EXPENSES_MANAGE,
   PermissionKey.REPORTING_VIEW,
 ];
 

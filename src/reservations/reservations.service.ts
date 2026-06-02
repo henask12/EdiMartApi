@@ -21,12 +21,88 @@ export class ReservationsService {
     private readonly sales: SalesService,
   ) {}
 
+  private async expireOverdueReservations(actorUserId?: string) {
+    const now = new Date();
+    const defaultLoc = await this.locations.getDefault();
+    const overdue = await this.prisma.reservation.findMany({
+      where: {
+        status: ReservationStatus.RESERVED,
+        expiresAt: { lt: now },
+      },
+      include: { product: true },
+      take: 100,
+    });
+
+    for (const reservation of overdue) {
+      const inv = await this.prisma.inventoryItem.findUnique({
+        where: {
+          productId_locationId: {
+            productId: reservation.productId,
+            locationId: defaultLoc.id,
+          },
+        },
+      });
+      if (!inv) continue;
+
+      const { onHand, available } = await productStockSnapshot(
+        this.prisma,
+        reservation.productId,
+        defaultLoc.id,
+      );
+      const availableAfter = available.add(reservation.quantity);
+
+      await this.prisma.$transaction(async (tx) => {
+        const current = await tx.reservation.findUnique({ where: { id: reservation.id } });
+        if (!current || current.status !== ReservationStatus.RESERVED) {
+          return;
+        }
+
+        await tx.reservation.update({
+          where: { id: reservation.id },
+          data: {
+            status: ReservationStatus.EXPIRED,
+            reservationEndDate: now,
+          },
+        });
+
+        await tx.stockMovement.create({
+          data: {
+            inventoryItemId: inv.id,
+            type: MovementType.RELEASE_RESERVE,
+            qtyDelta: reservation.quantity.neg(),
+            beforeOnHand: onHand,
+            afterOnHand: onHand,
+            refType: "RESERVATION",
+            refId: reservation.id,
+            createdByUserId: actorUserId ?? reservation.createdByUserId,
+            metadata: {
+              reservationId: reservation.id,
+              reservedQty: reservation.quantity.neg().toString(),
+              availableBefore: available.toString(),
+              availableAfter: availableAfter.toString(),
+              customerName: reservation.customerName,
+              autoExpired: true,
+            },
+          },
+        });
+      });
+
+      await this.audit.log(
+        actorUserId ?? reservation.createdByUserId,
+        "EXPIRE_RESERVE",
+        "Reservation",
+        reservation.id,
+      );
+    }
+  }
+
   async list(params: {
     status?: ReservationStatus;
     productId?: string;
     skip?: number;
     take?: number;
   }) {
+    await this.expireOverdueReservations();
     const take = Math.min(params.take ?? 20, 100);
     const skip = params.skip ?? 0;
     const where = {
@@ -53,6 +129,7 @@ export class ReservationsService {
     userId: string,
     data: { productId: string; quantity: string; customerName?: string; expiresAt?: string },
   ) {
+    await this.expireOverdueReservations(userId);
     const qty = toDecimal(data.quantity);
     if (qty.lte(0)) {
       throw new BadRequestException("Quantity must be positive");
@@ -77,6 +154,7 @@ export class ReservationsService {
           productId: data.productId,
           quantity: qty,
           customerName: data.customerName?.trim() || null,
+          reservedDate: new Date(),
           expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
           createdByUserId: userId,
         },
@@ -112,6 +190,7 @@ export class ReservationsService {
   }
 
   async cancel(userId: string, id: string) {
+    await this.expireOverdueReservations(userId);
     const reservation = await this.prisma.reservation.findUnique({
       where: { id },
       include: { product: true },
@@ -145,7 +224,10 @@ export class ReservationsService {
     const updated = await this.prisma.$transaction(async (tx) => {
       const res = await tx.reservation.update({
         where: { id },
-        data: { status: ReservationStatus.CANCELLED },
+        data: {
+          status: ReservationStatus.CANCELLED,
+          reservationEndDate: new Date(),
+        },
         include: { product: true },
       });
       await tx.stockMovement.create({
@@ -177,8 +259,9 @@ export class ReservationsService {
   async update(
     userId: string,
     id: string,
-    data: { quantity?: string; customerName?: string },
+    data: { quantity?: string; customerName?: string; expiresAt?: string },
   ) {
+    await this.expireOverdueReservations(userId);
     const reservation = await this.prisma.reservation.findUnique({
       where: { id },
       include: { product: true },
@@ -231,7 +314,16 @@ export class ReservationsService {
     const updated = await this.prisma.$transaction(async (tx) => {
       const res = await tx.reservation.update({
         where: { id },
-        data: { quantity: newQty, customerName },
+        data: {
+          quantity: newQty,
+          customerName,
+          expiresAt:
+            data.expiresAt !== undefined
+              ? data.expiresAt
+                ? new Date(data.expiresAt)
+                : null
+              : undefined,
+        },
         include: { product: true },
       });
 
@@ -298,6 +390,7 @@ export class ReservationsService {
   }
 
   async completeAsSale(userId: string, id: string) {
+    await this.expireOverdueReservations(userId);
     const reservation = await this.prisma.reservation.findUnique({
       where: { id },
     });
@@ -321,6 +414,11 @@ export class ReservationsService {
 
     await this.audit.log(userId, "COMPLETE_RESERVE", "Reservation", id, {
       saleId: checkout.sale.id,
+    });
+
+    await this.prisma.reservation.update({
+      where: { id },
+      data: { reservationEndDate: new Date() },
     });
 
     return {

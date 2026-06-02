@@ -29,6 +29,10 @@ class UpdateReservationDto {
   @IsOptional()
   @IsString()
   customerName?: string;
+
+  @IsOptional()
+  @IsString()
+  expiresAt?: string;
 }
 
 type Authed = { user: { userId: string } };
