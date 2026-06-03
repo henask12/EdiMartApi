@@ -216,10 +216,12 @@ model Reservation {
   productId       String
   product         Product           @relation(fields: [productId], references: [id])
   quantity        Decimal           @db.Decimal(18, 4)
-  status          ReservationStatus @default(RESERVED)
-  customerName    String?
-  expiresAt       DateTime?
-  createdByUserId String
+  status             ReservationStatus @default(RESERVED)
+  customerName       String?
+  reservedDate       DateTime          @default(now())
+  expiresAt          DateTime?
+  reservationEndDate DateTime?
+  createdByUserId    String
   createdBy       User              @relation(fields: [createdByUserId], references: [id])
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
