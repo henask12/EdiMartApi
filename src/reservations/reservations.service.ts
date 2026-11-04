@@ -1,19 +1,24 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
+import { Cron } from "@nestjs/schedule";
 import { MovementType, Prisma, ReservationStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { LocationsService } from "../locations/locations.service";
 import { AuditService } from "../audit/audit.service";
-import { productStockSnapshot } from "../common/stock.util";
+import { lockInventoryRows, productStockSnapshot } from "../common/stock.util";
+import { BUSINESS_TZ } from "../common/business-time";
 import { SalesService } from "../sales/sales.service";
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
 
 @Injectable()
 export class ReservationsService {
+  private readonly logger = new Logger(ReservationsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly locations: LocationsService,
@@ -58,26 +63,35 @@ export class ReservationsService {
       throw new BadRequestException("Quantity must be positive");
     }
     const defaultLoc = await this.locations.getDefault();
-    const { inv, onHand, available } = await productStockSnapshot(
-      this.prisma,
-      data.productId,
-      defaultLoc.id,
-    );
-    if (!inv) {
-      throw new NotFoundException("No inventory for product");
+    const expiresAt = data.expiresAt ? new Date(data.expiresAt) : null;
+    if (expiresAt && Number.isNaN(expiresAt.getTime())) {
+      throw new BadRequestException("Invalid expiry date");
     }
-    if (available.lt(qty)) {
-      throw new BadRequestException("Not enough available stock to reserve");
+    if (expiresAt && expiresAt.getTime() <= Date.now()) {
+      throw new BadRequestException("Reservation expiry must be in the future");
     }
 
-    const availableAfter = available.sub(qty);
     const reservation = await this.prisma.$transaction(async (tx) => {
+      // Check and reserve under the same row lock so two reservations cannot both claim the last unit.
+      await lockInventoryRows(tx, [data.productId], defaultLoc.id);
+      const { inv, onHand, available } = await productStockSnapshot(
+        tx,
+        data.productId,
+        defaultLoc.id,
+      );
+      if (!inv) {
+        throw new NotFoundException("No inventory for product");
+      }
+      if (available.lt(qty)) {
+        throw new BadRequestException("Not enough available stock to reserve");
+      }
+      const availableAfter = available.sub(qty);
       const created = await tx.reservation.create({
         data: {
           productId: data.productId,
           quantity: qty,
           customerName: data.customerName?.trim() || null,
-          expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
+          expiresAt,
           createdByUserId: userId,
         },
         include: { product: true },
@@ -308,16 +322,20 @@ export class ReservationsService {
       throw new BadRequestException("Reservation is not active");
     }
 
-    const checkout = await this.sales.checkout(userId, {
-      lines: [
-        {
-          productId: reservation.productId,
-          quantity: reservation.quantity.toString(),
-          reservationId: id,
-        },
-      ],
-      notes: `Reservation ${id}`,
-    });
+    const checkout = await this.sales.checkout(
+      userId,
+      {
+        lines: [
+          {
+            productId: reservation.productId,
+            quantity: reservation.quantity.toString(),
+            reservationId: id,
+          },
+        ],
+        notes: `Reservation ${id}`,
+      },
+      `reservation-complete:${id}`,
+    );
 
     await this.audit.log(userId, "COMPLETE_RESERVE", "Reservation", id, {
       saleId: checkout.sale.id,
@@ -327,5 +345,83 @@ export class ReservationsService {
       reservation: { ...reservation, status: ReservationStatus.COMPLETED },
       ...checkout,
     };
+  }
+
+  /** Every 15 minutes: expire reservations whose time is up and release their stock. */
+  @Cron("*/15 * * * *", { timeZone: BUSINESS_TZ })
+  async sweepExpired() {
+    try {
+      const count = await this.expireDue();
+      if (count > 0) {
+        this.logger.log(`Expired ${count} reservation(s)`);
+      }
+    } catch (err) {
+      this.logger.error(`Reservation expiry sweep failed: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Mark reservations past their `expiresAt` as EXPIRED and write a RELEASE_RESERVE movement for
+   * each. Stock availability already ignores expired reservations; this keeps the status and the
+   * ledger in step. Returns how many were expired.
+   */
+  async expireDue(now: Date = new Date()) {
+    const due = await this.prisma.reservation.findMany({
+      where: { status: ReservationStatus.RESERVED, expiresAt: { lte: now } },
+      select: { id: true },
+    });
+    if (due.length === 0) {
+      return 0;
+    }
+    const defaultLoc = await this.locations.getDefault();
+    let expired = 0;
+    for (const { id } of due) {
+      const done = await this.prisma.$transaction(async (tx) => {
+        const reservation = await tx.reservation.findUnique({ where: { id } });
+        if (!reservation || reservation.status !== ReservationStatus.RESERVED) {
+          return false;
+        }
+        await lockInventoryRows(tx, [reservation.productId], defaultLoc.id);
+        const { inv, onHand, available } = await productStockSnapshot(
+          tx,
+          reservation.productId,
+          defaultLoc.id,
+        );
+        await tx.reservation.update({
+          where: { id },
+          data: { status: ReservationStatus.EXPIRED },
+        });
+        if (inv) {
+          await tx.stockMovement.create({
+            data: {
+              inventoryItemId: inv.id,
+              type: MovementType.RELEASE_RESERVE,
+              qtyDelta: reservation.quantity.neg(),
+              beforeOnHand: onHand,
+              afterOnHand: onHand,
+              refType: "RESERVATION",
+              refId: id,
+              notes: "Reservation expired",
+              metadata: {
+                reservationId: id,
+                reservedQty: reservation.quantity.neg().toString(),
+                availableBefore: available.sub(reservation.quantity).toString(),
+                availableAfter: available.toString(),
+                customerName: reservation.customerName,
+                expired: true,
+              },
+            },
+          });
+        }
+        await tx.auditLog.create({
+          data: { action: "EXPIRE_RESERVE", entity: "Reservation", entityId: id },
+        });
+        return true;
+      });
+      if (done) {
+        expired += 1;
+      }
+    }
+    return expired;
   }
 }

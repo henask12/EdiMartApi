@@ -9,7 +9,7 @@ import { LocationsService } from "../locations/locations.service";
 import { AuditService } from "../audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { buildCreatedAtRange } from "../common/date-range.util";
-import { productStockSnapshot } from "../common/stock.util";
+import { allocateFromBatches, lockInventoryRows, productStockSnapshot } from "../common/stock.util";
 import { ExportService, type ExportColumn } from "../export/export.service";
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
@@ -360,6 +360,7 @@ export class InventoryService {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await lockInventoryRows(tx, [data.productId], defaultLoc.id);
       const current = await tx.inventoryItem.findUniqueOrThrow({
         where: { id: inv.id },
       });
@@ -435,6 +436,7 @@ export class InventoryService {
       throw new NotFoundException("Inventory row not found for product");
     }
     const updated = await this.prisma.$transaction(async (tx) => {
+      await lockInventoryRows(tx, [data.productId], defaultLoc.id);
       const current = await tx.inventoryItem.findUniqueOrThrow({
         where: { id: inv.id },
       });
@@ -442,6 +444,9 @@ export class InventoryService {
       const nextQty = beforeOnHand.add(delta);
       if (nextQty.lt(0)) {
         throw new BadRequestException("Adjustment would make quantity negative");
+      }
+      if (delta.lt(0)) {
+        await allocateFromBatches(tx, data.productId, delta.neg());
       }
       await tx.stockMovement.create({
         data: {
@@ -489,6 +494,7 @@ export class InventoryService {
       throw new NotFoundException("Inventory row not found for product");
     }
     const updated = await this.prisma.$transaction(async (tx) => {
+      await lockInventoryRows(tx, [data.productId], defaultLoc.id);
       const current = await tx.inventoryItem.findUniqueOrThrow({
         where: { id: inv.id },
       });

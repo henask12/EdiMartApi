@@ -1,8 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
+import { neutralizeFormula } from "./formula-safety";
 
 export type ExportFormat = "csv" | "xlsx" | "pdf";
+
+export { neutralizeFormula };
 
 export type ExportColumn = { header: string; key: string };
 
@@ -37,7 +40,8 @@ export class ExportService {
     columns: ExportColumn[],
     rows: Record<string, string | number | null | undefined>[],
   ): ExportResult {
-    const escape = (v: string) => {
+    const escape = (raw: string) => {
+      const v = neutralizeFormula(raw);
       if (v.includes(",") || v.includes('"') || v.includes("\n")) {
         return `"${v.replace(/"/g, '""')}"`;
       }
@@ -66,7 +70,8 @@ export class ExportService {
     for (const row of rows) {
       const values: Record<string, string | number> = {};
       for (const col of columns) {
-        values[col.key] = row[col.key] ?? "";
+        const cell = row[col.key] ?? "";
+        values[col.key] = typeof cell === "string" ? neutralizeFormula(cell) : cell;
       }
       sheet.addRow(values);
     }

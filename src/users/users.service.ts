@@ -67,6 +67,8 @@ export class UsersService {
         passwordHash,
         roleId: role.id,
         isActive: true,
+        // The admin chose this password, so the person it is for must replace it.
+        mustChangePassword: true,
       },
       include: { role: true },
     });
@@ -132,7 +134,10 @@ export class UsersService {
       throw new NotFoundException("User not found");
     }
     const passwordHash = await bcrypt.hash(password, 10);
-    await this.prisma.user.update({ where: { id }, data: { passwordHash } });
+    await this.prisma.user.update({
+      where: { id },
+      data: { passwordHash, mustChangePassword: true },
+    });
     await this.audit.log(actorId, "RESET_PASSWORD", "User", id);
     return { ok: true };
   }
@@ -175,8 +180,15 @@ export class UsersService {
     if (!ok) {
       throw new BadRequestException("Current password is incorrect");
     }
+    if (currentPassword === newPassword) {
+      throw new BadRequestException("Choose a new password that is different from the current one");
+    }
     const passwordHash = await bcrypt.hash(newPassword, 10);
-    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash, mustChangePassword: false },
+    });
+    await this.audit.log(userId, "CHANGE_PASSWORD", "User", userId);
     return { ok: true };
   }
 

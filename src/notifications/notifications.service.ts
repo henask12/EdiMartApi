@@ -5,6 +5,7 @@ import { Resend } from "resend";
 import { PrismaService } from "../prisma/prisma.service";
 import { LocationsService } from "../locations/locations.service";
 import { productStockSnapshot } from "../common/stock.util";
+import { BUSINESS_TZ } from "../common/business-time";
 
 @Injectable()
 export class NotificationsService {
@@ -63,7 +64,13 @@ export class NotificationsService {
       });
       return;
     }
-    await this.resend.emails.send({ from, to, subject, html });
+    try {
+      await this.resend.emails.send({ from, to, subject, html });
+    } catch (err) {
+      // A mail outage must never break the sale or stock change that triggered the alert.
+      this.logger.error(`Could not send "${subject}": ${String(err)}`);
+      return;
+    }
     await this.prisma.notificationLog.create({
       data: { type, subject, body: html, metadata: metadata ?? {} },
     });
@@ -129,7 +136,7 @@ export class NotificationsService {
     await this.sendMail(subject, html, NotificationType.LOW_STOCK, { productId: product.id });
   }
 
-  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: BUSINESS_TZ })
   async sendExpiryAlerts() {
     const days = Number(process.env.EXPIRY_ALERT_DAYS ?? 7);
     const until = new Date();

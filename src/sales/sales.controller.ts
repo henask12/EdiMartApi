@@ -1,8 +1,20 @@
-import { Body, Controller, Get, Param, Post, Query, Req, Res } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Query,
+  Req,
+  Res,
+} from "@nestjs/common";
+import { PaymentMethod } from "@prisma/client";
 import { CASHIER_ROLE, OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import type { Response } from "express";
 import { Type } from "class-transformer";
-import { IsArray, IsOptional, IsString, ValidateNested } from "class-validator";
+import { IsArray, IsEnum, IsOptional, IsString, MaxLength, ValidateNested } from "class-validator";
 import { Roles } from "../common/decorators/roles.decorator";
 import { parseExportFormat, sendExport } from "../export/export-response.util";
 import { SalesService } from "./sales.service";
@@ -29,6 +41,16 @@ class CheckoutDto {
   @IsArray()
   @IsString({ each: true })
   proofImagePaths?: string[];
+
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
+
+  /** Mobile-money / bank transaction ID. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  paymentReference?: string;
 }
 
 type Authed = { user: { userId: string } };
@@ -90,7 +112,15 @@ export class SalesController {
 
   @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @Post("checkout")
-  checkout(@Req() req: Authed, @Body() body: CheckoutDto) {
-    return this.sales.checkout(req.user.userId, body);
+  checkout(
+    @Req() req: Authed,
+    @Body() body: CheckoutDto,
+    @Headers("idempotency-key") idempotencyKey?: string,
+  ) {
+    const key = idempotencyKey?.trim();
+    if (!key || key.length < 8 || key.length > 128) {
+      throw new BadRequestException("Idempotency-Key header is required (8-128 characters)");
+    }
+    return this.sales.checkout(req.user.userId, body, key);
   }
 }

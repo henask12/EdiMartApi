@@ -10,6 +10,7 @@ import { AuditService } from "../audit/audit.service";
 import { InventoryService } from "../inventory/inventory.service";
 import { productStockSnapshot } from "../common/stock.util";
 import { ExportService, type ExportColumn } from "../export/export.service";
+import { StorageService } from "../storage/storage.service";
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
 
@@ -66,6 +67,7 @@ export class CatalogService {
     private readonly audit: AuditService,
     private readonly inventory: InventoryService,
     private readonly exportService: ExportService,
+    private readonly storage: StorageService,
   ) {}
 
   private stockStatus(available: Prisma.Decimal, restockAt: number): StockStatus {
@@ -87,9 +89,7 @@ export class CatalogService {
       product.id,
       locationId,
     );
-    const imageUrl = product.imagePath
-      ? `${(process.env.PUBLIC_API_URL ?? "http://127.0.0.1:4000").replace(/\/$/, "")}${product.imagePath}`
-      : null;
+    const imageUrl = await this.storage.publicUrl(product.imagePath);
     return {
       ...product,
       imageUrl,

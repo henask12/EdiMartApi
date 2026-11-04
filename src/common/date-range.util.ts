@@ -1,30 +1,10 @@
-/** Parse YYYY-MM-DD as start of local calendar day. */
-export const parseDateStart = (value: string): Date => {
-  const parts = value.split("-").map(Number);
-  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) {
-    throw new Error("Invalid date");
-  }
-  const [year, month, day] = parts;
-  const d = new Date(year, month - 1, day, 0, 0, 0, 0);
-  if (Number.isNaN(d.getTime())) {
-    throw new Error("Invalid date");
-  }
-  return d;
-};
+import { businessDayEnd, businessDayStart } from "./business-time";
 
-/** Parse YYYY-MM-DD as end of local calendar day (inclusive). */
-export const parseDateEnd = (value: string): Date => {
-  const parts = value.split("-").map(Number);
-  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) {
-    throw new Error("Invalid date");
-  }
-  const [year, month, day] = parts;
-  const d = new Date(year, month - 1, day, 23, 59, 59, 999);
-  if (Number.isNaN(d.getTime())) {
-    throw new Error("Invalid date");
-  }
-  return d;
-};
+/** Parse YYYY-MM-DD as the start of that calendar day in the business time zone. */
+export const parseDateStart = (value: string): Date => businessDayStart(value);
+
+/** Parse YYYY-MM-DD as the end of that calendar day (inclusive) in the business time zone. */
+export const parseDateEnd = (value: string): Date => businessDayEnd(value);
 
 export const buildCreatedAtRange = (from?: string, to?: string) => {
   if (!from && !to) {

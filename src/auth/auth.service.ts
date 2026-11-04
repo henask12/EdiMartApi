@@ -3,6 +3,7 @@ import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service";
 import { UsersService } from "../users/users.service";
+import { sessionTtlSeconds } from "../common/session";
 
 @Injectable()
 export class AuthService {
@@ -30,11 +31,14 @@ export class AuthService {
     });
     return {
       accessToken,
+      // The web app uses this for the cookie lifetime, so it always matches the token.
+      expiresInSeconds: sessionTtlSeconds(),
       user: {
         id: user.id,
         email: user.email,
         displayName: user.displayName,
         role: user.role.name,
+        mustChangePassword: user.mustChangePassword,
       },
     };
   }

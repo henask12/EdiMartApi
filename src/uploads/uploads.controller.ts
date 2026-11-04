@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Post,
   Req,
@@ -25,7 +26,7 @@ export class UploadsController {
   )
   uploadProductImage(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
-      return { message: "No file uploaded" };
+      throw new BadRequestException("No file uploaded");
     }
     return this.uploads.saveProductImage(file);
   }
@@ -40,7 +41,7 @@ export class UploadsController {
   )
   uploadSaleProof(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
-      return { message: "No file uploaded" };
+      throw new BadRequestException("No file uploaded");
     }
     return this.uploads.saveSaleProof(file);
   }

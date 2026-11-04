@@ -2,6 +2,54 @@
 
 NestJS + Prisma API for Edi's Collection mart.
 
+## Develop, test, operate
+
+```bash
+npm install
+cp .env.example .env            # fill in DATABASE_URL and JWT_SECRET
+npm run db:migrate              # prisma migrate deploy
+npm run start:dev               # http://localhost:4000
+npm test                        # Jest + a real embedded PostgreSQL (no Docker or database needed)
+npm run typecheck
+```
+
+| Command | What it does |
+|---|---|
+| `npm test` | Unit + end-to-end tests. Starts a throwaway PostgreSQL, applies every migration from scratch, checks the migrations match `schema.prisma`, then runs the checkout-race, idempotency, numbering, FEFO, reservation, permission, storage, seed and reconciliation tests. |
+| `npm run reconcile` | **Read-only** report: stored stock vs the movement ledger, batches vs on-hand, negative stock, over-reservation. `-- --csv out.csv`, `-- --json out.json`, `-- --strict` (non-zero exit when anything is found). Never changes data. |
+| `npm run db:seed` | First-run data for an **empty** database (refuses otherwise). Owner password from `ADMIN_INITIAL_PASSWORD` or generated and printed once. |
+| `npm run uploads:migrate` | Dry run of moving existing uploads into `products/` and `proofs/`; add `-- --apply` to do it. |
+| `npm run db:status` | `prisma migrate status`. |
+
+### First run
+
+1. Deploy, with `DATABASE_URL`, `JWT_SECRET`, `WEB_ORIGIN`, `PUBLIC_API_URL` set.
+2. Create the owner: either `npm run db:seed` with a shell, or set `SETUP_ENABLED=1`,
+   `SETUP_SECRET` and (optionally) `ADMIN_INITIAL_PASSWORD`, then
+   `curl -X POST -H "X-Setup-Key: $SETUP_SECRET" https://<api>/setup/seed`.
+   Read the one-time owner login from the server log (it is never returned in the response).
+3. Sign in; you are asked to choose a new password straight away.
+4. Set `SETUP_ENABLED=0` (or remove it) and redeploy. The setup routes then answer 404.
+
+### Checkout contract
+
+`POST /sales/checkout` needs an `Idempotency-Key` header (8-128 characters, one per sale attempt;
+reuse it only to retry the *same* sale). Body: `lines[]`, optional `paymentMethod`
+(`CASH` default, `TELEBIRR`, `CBE_BIRR`, `MPESA`, `BANK_TRANSFER`, `CARD`), `paymentReference`,
+`proofImagePaths[]`, `notes`. Not enough stock answers `409` naming the product.
+
+### Files
+
+Product photos are public; payment proofs are private and only reachable through short-lived
+signed links. `STORAGE_DRIVER=local` needs a persistent disk (Render's free tier has none: files
+vanish on redeploy). For production use `STORAGE_DRIVER=s3` with Cloudflare R2, AWS S3 or Supabase
+Storage (see `.env.example`), then run `npm run uploads:migrate -- --apply` once.
+
+### Migrations
+
+See [docs/MIGRATIONS.md](docs/MIGRATIONS.md) for what was found in the migration history and the
+proposed one-time repair. Nothing there has been run against production.
+
 ## Render setup (required)
 
 In **Render** → **EdiMartApi** → **Settings**:

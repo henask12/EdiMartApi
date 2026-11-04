@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query, Req, Res } from "@nestjs/common";
-import { MovementType } from "@prisma/client";
+import { MovementType, PermissionKey } from "@prisma/client";
+import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import type { Response } from "express";
 import { IsOptional, IsString } from "class-validator";
@@ -38,6 +39,7 @@ export class StockController {
     return this.inventory.receiveGoods(req.user.userId, body);
   }
 
+  @RequirePermissions(PermissionKey.STOCK_HISTORY_VIEW)
   @Get("history/export")
   async exportHistory(
     @Res() res: Response,
@@ -56,11 +58,13 @@ export class StockController {
     sendExport(res, result);
   }
 
+  @RequirePermissions(PermissionKey.STOCK_HISTORY_VIEW)
   @Get("history/:id")
   getMovement(@Param("id") id: string) {
     return this.inventory.getMovement(id);
   }
 
+  @RequirePermissions(PermissionKey.STOCK_HISTORY_VIEW)
   @Get("history")
   history(
     @Query("productId") productId?: string,
@@ -80,6 +84,7 @@ export class StockController {
     });
   }
 
+  @RequirePermissions(PermissionKey.STOCK_HISTORY_VIEW)
   @Get("batches")
   batches(
     @Query("productId") productId: string,

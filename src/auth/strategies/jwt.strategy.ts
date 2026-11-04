@@ -28,7 +28,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       where: { id: payload.sub },
       include: { role: true },
     });
-    if (!user) {
+    // A deactivated user's existing token stops working immediately.
+    if (!user || !user.isActive) {
       return null;
     }
     const permissions = await this.permissions.getPermissionsForRole(user.role.name);
@@ -38,6 +39,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       displayName: user.displayName,
       roleName: user.role.name,
       permissions,
+      mustChangePassword: user.mustChangePassword,
     };
   }
 }

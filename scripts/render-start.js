@@ -26,6 +26,9 @@ const findRepoRoot = () => {
 const repoRoot = findRepoRoot();
 const prismaCli = `node ${path.join(repoRoot, "node_modules", "prisma", "build", "index.js")}`;
 const ROLE_STRING_MIGRATION = "20250520120000_role_name_string";
+// Only migrations up to here may ever be baselined (marked applied without running). Everything
+// newer MUST really run, or the database would be missing the columns/tables the app needs.
+const LAST_BASELINE_MIGRATION = "20250523120000_sale_line_unit_cost";
 
 const run = (cmd) => {
   console.log(`> (${repoRoot}) ${cmd}`);
@@ -96,6 +99,9 @@ const baselineExistingSchema = () => {
   const migrations = listMigrations();
   for (const name of migrations) {
     if (name === ROLE_STRING_MIGRATION) {
+      continue;
+    }
+    if (name > LAST_BASELINE_MIGRATION) {
       continue;
     }
     console.log(`Marking migration as applied: ${name}`);

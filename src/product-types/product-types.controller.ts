@@ -1,6 +1,8 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from "@nestjs/common";
 import { OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import { IsString, MinLength } from "class-validator";
+import { PermissionKey } from "@prisma/client";
+import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { Roles } from "../common/decorators/roles.decorator";
 import { ProductTypesService } from "./product-types.service";
 
@@ -16,11 +18,13 @@ type Authed = { user: { userId: string } };
 export class ProductTypesController {
   constructor(private readonly productTypes: ProductTypesService) {}
 
+  @RequirePermissions(PermissionKey.PRODUCTS_VIEW)
   @Get()
   list() {
     return this.productTypes.list();
   }
 
+  @RequirePermissions(PermissionKey.PRODUCTS_VIEW)
   @Get(":id")
   get(@Param("id") id: string) {
     return this.productTypes.get(id);

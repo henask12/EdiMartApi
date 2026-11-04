@@ -1,18 +1,41 @@
+import { createHash } from "crypto";
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { MovementType, PaymentMethod, Prisma, ReservationStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { LocationsService } from "../locations/locations.service";
-import { AuditService } from "../audit/audit.service";
-import { productStockSnapshot } from "../common/stock.util";
 import { NotificationsService } from "../notifications/notifications.service";
+import { StorageService } from "../storage/storage.service";
 import { buildCreatedAtRange } from "../common/date-range.util";
+import {
+  addDays,
+  businessDateString,
+  businessDayStart,
+  businessMonthStart,
+  businessWeekStart,
+  businessYearStart,
+  nextMonthStart,
+  nextYearStart,
+} from "../common/business-time";
+import {
+  allocateFromBatches,
+  lockInventoryRows,
+  productStockSnapshot,
+} from "../common/stock.util";
 import { ExportService, type ExportColumn } from "../export/export.service";
 
-const toDecimal = (value: string | number) => new Prisma.Decimal(value);
+const toDecimal = (value: string | number) => {
+  try {
+    return new Prisma.Decimal(value);
+  } catch {
+    throw new BadRequestException("Invalid quantity");
+  }
+};
 
 type SaleLineForProfit = {
   quantity: Prisma.Decimal;
@@ -26,39 +49,77 @@ const lineNetProfit = (line: SaleLineForProfit) => {
   return line.lineTotal.sub(unitCost.mul(line.quantity));
 };
 
-const apiBase = () =>
-  (process.env.PUBLIC_API_URL ?? "http://127.0.0.1:4000").replace(/\/$/, "");
-
-type CheckoutLineInput = {
+export type CheckoutLineInput = {
   productId: string;
   quantity: string;
   reservationId?: string;
 };
 
+export type CheckoutInput = {
+  lines: CheckoutLineInput[];
+  notes?: string;
+  proofImagePaths?: string[];
+  paymentMethod?: PaymentMethod;
+  paymentReference?: string;
+};
+
+const MAX_CHECKOUT_ATTEMPTS = 3;
+const CHECKOUT_SCOPE = "checkout";
+
+/** Serialization failures and deadlocks are safe to retry from the top. */
+const isRetryable = (err: unknown) => {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError)) {
+    return false;
+  }
+  if (err.code === "P2034") {
+    return true;
+  }
+  if (err.code === "P2010" && /40001|40P01|could not serialize|deadlock/i.test(err.message)) {
+    return true;
+  }
+  // Two requests with the same Idempotency-Key raced; the retry will find the stored result.
+  if (err.code === "P2002") {
+    const target = JSON.stringify(err.meta?.target ?? "");
+    return /scope|key/i.test(target);
+  }
+  return false;
+};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 @Injectable()
 export class SalesService {
+  private readonly logger = new Logger(SalesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly locations: LocationsService,
-    private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly exportService: ExportService,
+    private readonly storage: StorageService,
   ) {}
 
-  private mapSale(
+  private async mapSale(
     sale: Prisma.SaleGetPayload<{
       include: {
         lines: { include: { product: { include: { category: true } } } };
         createdBy: { select: { id: true; displayName: true; email: true } };
         attachments: true;
+        payments: true;
       };
     }>,
   ) {
-    const { lines, attachments, grandTotal, subtotal, ...rest } = sale;
+    const { lines, attachments, payments, grandTotal, subtotal, ...rest } = sale;
     return {
       ...rest,
       grandTotal: grandTotal.toFixed(2),
       subtotal: subtotal.toFixed(2),
+      payments: payments.map((p) => ({
+        id: p.id,
+        method: p.method,
+        amount: p.amount.toFixed(2),
+        reference: p.reference,
+      })),
       lines: lines.map((l) => {
         const unitCost = (l.unitCostAtSale.gt(0) ? l.unitCostAtSale : l.product.costPrice).toFixed(2);
         const qty = l.quantity;
@@ -80,12 +141,14 @@ export class SalesService {
           },
         };
       }),
-      attachments: attachments.map((a) => ({
-        id: a.id,
-        imagePath: a.imagePath,
-        imageUrl: `${apiBase()}${a.imagePath}`,
-        createdAt: a.createdAt,
-      })),
+      attachments: await Promise.all(
+        attachments.map(async (a) => ({
+          id: a.id,
+          imagePath: a.imagePath,
+          imageUrl: await this.storage.privateUrl(a.imagePath),
+          createdAt: a.createdAt,
+        })),
+      ),
     };
   }
 
@@ -133,12 +196,13 @@ export class SalesService {
           lines: { include: { product: { include: { category: true } } } },
           createdBy: { select: { id: true, displayName: true, email: true } },
           attachments: true,
+          payments: true,
         },
       }),
       this.prisma.sale.count({ where }),
     ]);
     return {
-      items: items.map((s) => this.mapSale(s)),
+      items: await Promise.all(items.map((s) => this.mapSale(s))),
       total,
       skip,
       take,
@@ -171,6 +235,7 @@ export class SalesService {
       { header: "Item", key: "product" },
       { header: "Category", key: "category" },
       { header: "Cashier", key: "cashier" },
+      { header: "Payment", key: "payment" },
       { header: "Unit price", key: "unitPrice" },
       { header: "Quantity", key: "quantity" },
       { header: "Total price", key: "lineTotal" },
@@ -181,6 +246,7 @@ export class SalesService {
     for (const s of items) {
       const date = s.createdAt.toISOString().slice(0, 16).replace("T", " ");
       const cashier = s.createdBy.displayName ?? s.createdBy.email;
+      const payment = s.payments.map((p) => p.method).join("+");
       for (const l of s.lines) {
         rows.push({
           date,
@@ -192,28 +258,157 @@ export class SalesService {
           netProfit: l.netProfit,
           saleNumber: s.saleNumber,
           cashier,
+          payment,
         });
       }
     }
     return this.exportService.build(format, `sales-${Date.now()}`, columns, rows);
   }
 
-  async checkout(
-    userId: string,
-    input: { lines: CheckoutLineInput[]; notes?: string; proofImagePaths?: string[] },
-  ) {
+  /**
+   * Record a sale.
+   *
+   * The stock check and the deduction happen inside one transaction that first locks the
+   * affected inventory rows, so two cashiers can never both sell the last unit. Serialization
+   * failures are retried up to three times. `idempotencyKey` makes the call safe to repeat: the
+   * same key with the same request returns the original sale instead of selling twice.
+   */
+  async checkout(userId: string, input: CheckoutInput, idempotencyKey: string) {
     if (!input.lines?.length) {
       throw new BadRequestException("Add at least one product");
     }
-
+    if (!idempotencyKey) {
+      throw new BadRequestException("Idempotency-Key is required");
+    }
+    const requestHash = this.hashRequest(input);
     const defaultLoc = await this.locations.getDefault();
+    await this.ensureSaleCounter(businessDateString());
+
+    let outcome: { saleId: string; replayed: boolean } | undefined;
+    for (let attempt = 1; attempt <= MAX_CHECKOUT_ATTEMPTS; attempt += 1) {
+      try {
+        outcome = await this.prisma.$transaction(
+          (tx) =>
+            this.checkoutInTransaction(tx, userId, input, idempotencyKey, requestHash, defaultLoc.id),
+          {
+            // Correctness comes from the explicit row locks taken in checkoutInTransaction, which
+            // queue concurrent sales instead of failing them. (Serializable isolation would abort
+            // most of a burst and rely on retries.)
+            isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+            maxWait: 10_000,
+            timeout: 20_000,
+          },
+        );
+        break;
+      } catch (err) {
+        if (!isRetryable(err)) {
+          throw err;
+        }
+        if (attempt === MAX_CHECKOUT_ATTEMPTS) {
+          this.logger.warn(`Checkout gave up after ${attempt} attempts: ${String(err)}`);
+          throw new ConflictException("The shop is busy right now, please try again");
+        }
+        await sleep(30 * attempt + Math.floor(Math.random() * 40));
+      }
+    }
+    if (!outcome) {
+      throw new ConflictException("The shop is busy right now, please try again");
+    }
+
+    const sale = await this.getSale(outcome.saleId);
+    if (!outcome.replayed) {
+      // The sale is already committed; an alert failure must never turn it into an error.
+      const productIds = [...new Set(input.lines.map((l) => l.productId))];
+      for (const productId of productIds) {
+        try {
+          await this.notifications.checkStockAlertsForProduct(productId);
+        } catch (err) {
+          this.logger.error(`Stock alert failed for ${productId}: ${String(err)}`);
+        }
+      }
+    }
+    return {
+      sale,
+      digitalReceipt: this.buildReceiptText(sale),
+      replayed: outcome.replayed,
+    };
+  }
+
+  private hashRequest(input: CheckoutInput) {
+    const normalized = {
+      lines: [...input.lines]
+        .map((l) => ({
+          productId: l.productId,
+          quantity: toDecimal(l.quantity).toString(),
+          reservationId: l.reservationId ?? null,
+        }))
+        .sort((a, b) =>
+          `${a.productId}:${a.reservationId}`.localeCompare(`${b.productId}:${b.reservationId}`),
+        ),
+      method: input.paymentMethod ?? PaymentMethod.CASH,
+      reference: input.paymentReference ?? null,
+      proofs: [...(input.proofImagePaths ?? [])].sort(),
+      notes: input.notes ?? null,
+    };
+    return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+  }
+
+  private async checkoutInTransaction(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    input: CheckoutInput,
+    idempotencyKey: string,
+    requestHash: string,
+    locationId: string,
+  ): Promise<{ saleId: string; replayed: boolean }> {
     const productIds = [...new Set(input.lines.map((l) => l.productId))];
-    const products = await this.prisma.product.findMany({
+
+    // Lock first, then read: from here until commit nobody else can change these stock rows.
+    // A duplicate request with the same key queues here and then finds the first one's result.
+    await lockInventoryRows(tx, productIds, locationId);
+
+    const existingKey = await tx.idempotencyKey.findUnique({
+      where: { scope_key: { scope: CHECKOUT_SCOPE, key: idempotencyKey } },
+    });
+    if (existingKey) {
+      if (existingKey.requestHash !== requestHash || !existingKey.saleId) {
+        throw new ConflictException("This Idempotency-Key was already used for a different sale");
+      }
+      return { saleId: existingKey.saleId, replayed: true };
+    }
+
+    const products = await tx.product.findMany({
       where: { id: { in: productIds }, isActive: true },
     });
     const productById = new Map(products.map((p) => [p.id, p]));
+    for (const id of productIds) {
+      if (!productById.has(id)) {
+        throw new NotFoundException("Product not found");
+      }
+    }
 
-    const computedLines: Array<{
+    // Reservation-backed lines are fulfilled first; the remaining lines are merged per product
+    // so that two lines for the same product cannot each pass the check on their own.
+    type Demand = { productId: string; quantity: Prisma.Decimal; reservationId?: string };
+    const reservationDemands: Demand[] = [];
+    const freeDemand = new Map<string, Prisma.Decimal>();
+    for (const line of input.lines) {
+      const qty = toDecimal(line.quantity);
+      if (qty.lte(0)) {
+        throw new BadRequestException("Quantity must be positive");
+      }
+      if (line.reservationId) {
+        reservationDemands.push({ productId: line.productId, quantity: qty, reservationId: line.reservationId });
+      } else {
+        freeDemand.set(line.productId, (freeDemand.get(line.productId) ?? new Prisma.Decimal(0)).add(qty));
+      }
+    }
+    const demands: Demand[] = [
+      ...reservationDemands,
+      ...[...freeDemand.entries()].map(([productId, quantity]) => ({ productId, quantity })),
+    ];
+
+    const computed: Array<{
       productId: string;
       quantity: Prisma.Decimal;
       unitPrice: Prisma.Decimal;
@@ -221,211 +416,222 @@ export class SalesService {
       unitCostAtSale: Prisma.Decimal;
       reservationId?: string;
     }> = [];
+    const movementPlans: Array<{
+      inventoryItemId: string;
+      productId: string;
+      quantity: Prisma.Decimal;
+      reservationId?: string;
+      reservationCustomer?: string | null;
+    }> = [];
 
-    for (const line of input.lines) {
-      const product = productById.get(line.productId);
-      if (!product) {
-        throw new NotFoundException(`Product not found`);
-      }
-      const qty = toDecimal(line.quantity);
-      if (qty.lte(0)) {
-        throw new BadRequestException("Quantity must be positive");
-      }
-
-      const inv = await this.prisma.inventoryItem.findUnique({
-        where: {
-          productId_locationId: { productId: line.productId, locationId: defaultLoc.id },
-        },
+    for (const demand of demands) {
+      const product = productById.get(demand.productId)!;
+      const inv = await tx.inventoryItem.findUnique({
+        where: { productId_locationId: { productId: demand.productId, locationId } },
       });
       if (!inv) {
         throw new NotFoundException(`No inventory for ${product.name}`);
       }
-      const unitCostAtSale = inv.averageCost;
 
-      if (line.reservationId) {
-        const reservation = await this.prisma.reservation.findUnique({
-          where: { id: line.reservationId },
-        });
+      let reservationCustomer: string | null | undefined;
+      if (demand.reservationId) {
+        const reservation = await tx.reservation.findUnique({ where: { id: demand.reservationId } });
         if (!reservation || reservation.status !== ReservationStatus.RESERVED) {
           throw new BadRequestException("Reservation is not active");
         }
-        if (reservation.productId !== line.productId) {
+        if (reservation.productId !== demand.productId) {
           throw new BadRequestException("Reservation does not match product");
         }
-        if (!reservation.quantity.eq(qty)) {
+        if (!reservation.quantity.eq(demand.quantity)) {
           throw new BadRequestException("Quantity must match reservation");
         }
-        const { onHand } = await productStockSnapshot(
-          this.prisma,
-          line.productId,
-          defaultLoc.id,
-        );
-        if (onHand.lt(qty)) {
-          throw new BadRequestException(`Not enough stock on hand for ${product.name}`);
+        if (inv.quantityOnHand.lt(demand.quantity)) {
+          throw new ConflictException(`Not enough stock on hand for ${product.name}`);
         }
+        reservationCustomer = reservation.customerName;
       } else {
-        const { available } = await productStockSnapshot(
-          this.prisma,
-          line.productId,
-          defaultLoc.id,
-        );
-        if (available.lt(qty)) {
-          throw new BadRequestException(`Not enough available stock for ${product.name}`);
+        const { available } = await productStockSnapshot(tx, demand.productId, locationId);
+        if (available.lt(demand.quantity)) {
+          throw new ConflictException(
+            `Not enough available stock for ${product.name} (available ${available.toString()}, requested ${demand.quantity.toString()})`,
+          );
         }
       }
 
-      const lineTotal = product.sellingPrice.mul(qty);
-      computedLines.push({
+      computed.push({
         productId: product.id,
-        quantity: qty,
+        quantity: demand.quantity,
         unitPrice: product.sellingPrice,
-        lineTotal,
-        unitCostAtSale,
-        reservationId: line.reservationId,
+        lineTotal: product.sellingPrice.mul(demand.quantity),
+        unitCostAtSale: inv.averageCost,
+        reservationId: demand.reservationId,
+      });
+      movementPlans.push({
+        inventoryItemId: inv.id,
+        productId: demand.productId,
+        quantity: demand.quantity,
+        reservationId: demand.reservationId,
+        reservationCustomer,
       });
     }
 
-    const grandTotal = computedLines.reduce(
-      (acc, l) => acc.add(l.lineTotal),
-      new Prisma.Decimal(0),
+    const grandTotal = computed.reduce((acc, l) => acc.add(l.lineTotal), new Prisma.Decimal(0));
+    const proofPaths = (input.proofImagePaths ?? []).filter(
+      (p) => p.startsWith("/uploads/") && !p.includes(".."),
     );
 
-    const proofPaths = (input.proofImagePaths ?? []).filter((p) => p.startsWith("/uploads/"));
+    // Taken last so the hot counter row is held for as short a time as possible.
+    const saleNumber = await this.nextSaleNumber(tx, businessDateString());
 
-    const receipt = await this.prisma.$transaction(
-      async (tx) => {
-        const start = new Date();
-        start.setUTCHours(0, 0, 0, 0);
-        const count = await tx.sale.count({
-          where: { createdAt: { gte: start } },
-        });
-        const y = start.getUTCFullYear();
-        const m = String(start.getUTCMonth() + 1).padStart(2, "0");
-        const d = String(start.getUTCDate()).padStart(2, "0");
-        const seq = String(count + 1).padStart(4, "0");
-        const saleNumber = `SALE-${y}${m}${d}-${seq}`;
-
-        const sale = await tx.sale.create({
-          data: {
-            saleNumber,
-            subtotal: grandTotal,
-            discountTotal: 0,
-            taxTotal: 0,
-            grandTotal,
-            createdByUserId: userId,
-            lines: {
-              create: computedLines.map((l) => ({
-                productId: l.productId,
-                quantity: l.quantity,
-                unitPrice: l.unitPrice,
-                unitCostAtSale: l.unitCostAtSale,
-                lineDiscount: 0,
-                taxAmount: 0,
-                lineTotal: l.lineTotal,
-              })),
+    const sale = await tx.sale.create({
+      data: {
+        saleNumber,
+        subtotal: grandTotal,
+        discountTotal: 0,
+        taxTotal: 0,
+        grandTotal,
+        createdByUserId: userId,
+        lines: {
+          create: computed.map((l) => ({
+            productId: l.productId,
+            quantity: l.quantity,
+            unitPrice: l.unitPrice,
+            unitCostAtSale: l.unitCostAtSale,
+            lineDiscount: 0,
+            taxAmount: 0,
+            lineTotal: l.lineTotal,
+          })),
+        },
+        payments: {
+          create: [
+            {
+              method: input.paymentMethod ?? PaymentMethod.CASH,
+              amount: grandTotal,
+              reference: input.paymentReference?.trim() || null,
             },
-            payments: {
-              create: [{ method: PaymentMethod.CASH, amount: grandTotal }],
-            },
-            attachments: proofPaths.length
-              ? { create: proofPaths.map((imagePath) => ({ imagePath })) }
-              : undefined,
-          },
-          include: {
-            lines: { include: { product: true } },
-            attachments: true,
-          },
-        });
-
-        for (const line of computedLines) {
-          const inv = await tx.inventoryItem.findUniqueOrThrow({
-            where: {
-              productId_locationId: {
-                productId: line.productId,
-                locationId: defaultLoc.id,
-              },
-            },
-          });
-          const beforeOnHand = inv.quantityOnHand;
-          const afterOnHand = beforeOnHand.sub(line.quantity);
-          await tx.stockMovement.create({
-            data: {
-              inventoryItemId: inv.id,
-              type: MovementType.SALE,
-              qtyDelta: line.quantity.mul(new Prisma.Decimal(-1)),
-              beforeOnHand,
-              afterOnHand,
-              refType: "SALE",
-              refId: sale.id,
-              createdByUserId: userId,
-              notes: input.notes,
-            },
-          });
-          await tx.inventoryItem.update({
-            where: { id: inv.id },
-            data: { quantityOnHand: afterOnHand },
-          });
-
-          if (line.reservationId) {
-            const reservation = await tx.reservation.findUniqueOrThrow({
-              where: { id: line.reservationId },
-            });
-            const { available: availBefore } = await productStockSnapshot(
-              tx,
-              line.productId,
-              defaultLoc.id,
-            );
-            const availAfter = availBefore.add(line.quantity);
-            await tx.reservation.update({
-              where: { id: line.reservationId },
-              data: { status: ReservationStatus.COMPLETED },
-            });
-            await tx.stockMovement.create({
-              data: {
-                inventoryItemId: inv.id,
-                type: MovementType.RELEASE_RESERVE,
-                qtyDelta: line.quantity.mul(new Prisma.Decimal(-1)),
-                beforeOnHand: afterOnHand,
-                afterOnHand: afterOnHand,
-                refType: "RESERVATION",
-                refId: line.reservationId,
-                createdByUserId: userId,
-                metadata: {
-                  reservationId: line.reservationId,
-                  fulfilledBySale: sale.id,
-                  reservedQty: line.quantity.neg().toString(),
-                  availableBefore: availBefore.toString(),
-                  availableAfter: availAfter.toString(),
-                  customerName: reservation.customerName,
-                },
-              },
-            });
-          }
-        }
-
-        return sale;
+          ],
+        },
+        attachments: proofPaths.length
+          ? { create: proofPaths.map((imagePath) => ({ imagePath })) }
+          : undefined,
       },
-      {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-        maxWait: 5000,
-        timeout: 15000,
-      },
-    );
-
-    await this.audit.log(userId, "SELL", "Sale", receipt.id, {
-      saleNumber: receipt.saleNumber,
     });
 
-    for (const line of computedLines) {
-      await this.notifications.checkStockAlertsForProduct(line.productId);
+    for (const plan of movementPlans) {
+      // Re-read under the lock so before/after reflect earlier lines of this same sale.
+      const inv = await tx.inventoryItem.findUniqueOrThrow({ where: { id: plan.inventoryItemId } });
+      const deducted = await tx.inventoryItem.updateMany({
+        where: { id: inv.id, quantityOnHand: { gte: plan.quantity } },
+        data: { quantityOnHand: { decrement: plan.quantity } },
+      });
+      if (deducted.count !== 1) {
+        throw new ConflictException("Not enough stock on hand");
+      }
+
+      let running = inv.quantityOnHand;
+      for (const allocation of await allocateFromBatches(tx, plan.productId, plan.quantity)) {
+        const after = running.sub(allocation.quantity);
+        await tx.stockMovement.create({
+          data: {
+            inventoryItemId: inv.id,
+            stockBatchId: allocation.batchId,
+            type: MovementType.SALE,
+            qtyDelta: allocation.quantity.neg(),
+            beforeOnHand: running,
+            afterOnHand: after,
+            refType: "SALE",
+            refId: sale.id,
+            createdByUserId: userId,
+            notes: input.notes,
+          },
+        });
+        running = after;
+      }
+
+      if (plan.reservationId) {
+        const { available: availBefore } = await productStockSnapshot(tx, plan.productId, locationId);
+        await tx.reservation.update({
+          where: { id: plan.reservationId },
+          data: { status: ReservationStatus.COMPLETED },
+        });
+        await tx.stockMovement.create({
+          data: {
+            inventoryItemId: inv.id,
+            type: MovementType.RELEASE_RESERVE,
+            qtyDelta: plan.quantity.neg(),
+            beforeOnHand: running,
+            afterOnHand: running,
+            refType: "RESERVATION",
+            refId: plan.reservationId,
+            createdByUserId: userId,
+            metadata: {
+              reservationId: plan.reservationId,
+              fulfilledBySale: sale.id,
+              reservedQty: plan.quantity.neg().toString(),
+              availableBefore: availBefore.toString(),
+              availableAfter: availBefore.toString(),
+              customerName: plan.reservationCustomer ?? null,
+            },
+          },
+        });
+      }
     }
 
-    const full = await this.getSale(receipt.id);
+    await tx.auditLog.create({
+      data: {
+        userId,
+        action: "SELL",
+        entity: "Sale",
+        entityId: sale.id,
+        metadata: {
+          saleNumber,
+          grandTotal: grandTotal.toFixed(2),
+          paymentMethod: input.paymentMethod ?? PaymentMethod.CASH,
+        },
+      },
+    });
+    await tx.idempotencyKey.create({
+      data: { scope: CHECKOUT_SCOPE, key: idempotencyKey, requestHash, userId, saleId: sale.id },
+    });
 
-    return {
-      sale: full,
-      digitalReceipt: this.buildReceiptText(receipt),
-    };
+    return { saleId: sale.id, replayed: false };
+  }
+
+  /**
+   * Make sure today's counter row exists. A new day starts after any number already issued by
+   * the older count-based scheme (so the switch-over day cannot collide with itself). Runs
+   * outside the checkout transaction so the full-table look at Sale never takes part in it.
+   */
+  private async ensureSaleCounter(date: string) {
+    const compact = date.replace(/-/g, "");
+    const pattern = `^SALE-${compact}-[0-9]+$`;
+    await this.prisma.$executeRaw`
+      INSERT INTO "DocumentCounter" ("scope", "date", "value")
+      VALUES (
+        'SALE', ${date},
+        COALESCE(
+          (SELECT MAX(CAST(SPLIT_PART("saleNumber", '-', 3) AS INTEGER))
+             FROM "Sale" WHERE "saleNumber" ~ ${pattern}),
+          0
+        )
+      )
+      ON CONFLICT ("scope", "date") DO NOTHING`;
+  }
+
+  /** Next `SALE-YYYYMMDD-NNNN` for the business day: one atomic increment of the counter row. */
+  private async nextSaleNumber(tx: Prisma.TransactionClient, date: string) {
+    let rows = await tx.$queryRaw<{ value: number }[]>`
+      UPDATE "DocumentCounter" SET "value" = "value" + 1
+       WHERE "scope" = 'SALE' AND "date" = ${date}
+   RETURNING "value"`;
+    if (rows.length === 0) {
+      // The business day rolled over between ensureSaleCounter and now.
+      rows = await tx.$queryRaw<{ value: number }[]>`
+        INSERT INTO "DocumentCounter" ("scope", "date", "value") VALUES ('SALE', ${date}, 1)
+        ON CONFLICT ("scope", "date") DO UPDATE SET "value" = "DocumentCounter"."value" + 1
+        RETURNING "value"`;
+    }
+    return `SALE-${date.replace(/-/g, "")}-${String(rows[0].value).padStart(4, "0")}`;
   }
 
   async todaySummary() {
@@ -493,53 +699,46 @@ export class SalesService {
     }
   }
 
+  // Report periods follow the business calendar (Africa/Addis_Ababa), not the server's zone.
   private dayBounds(d: Date) {
-    const start = new Date(d);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
-    return { start, end, label: start.toISOString().slice(0, 10) };
+    const date = businessDateString(d);
+    return { start: businessDayStart(date), end: businessDayStart(addDays(date, 1)), label: date };
   }
 
   private weekBounds(d: Date) {
-    const start = new Date(d);
-    start.setHours(0, 0, 0, 0);
-    const day = start.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
-    start.setDate(start.getDate() + diff);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 7);
+    const start = businessWeekStart(businessDateString(d));
     return {
-      start,
-      end,
-      label: `week-${start.toISOString().slice(0, 10)}`,
+      start: businessDayStart(start),
+      end: businessDayStart(addDays(start, 7)),
+      label: `week-${start}`,
     };
   }
 
   private monthBounds(d: Date) {
-    const start = new Date(d.getFullYear(), d.getMonth(), 1);
-    const end = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    const start = businessMonthStart(businessDateString(d));
     return {
-      start,
-      end,
-      label: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`,
+      start: businessDayStart(start),
+      end: businessDayStart(nextMonthStart(start)),
+      label: start.slice(0, 7),
     };
   }
 
   private yearBounds(d: Date) {
-    const start = new Date(d.getFullYear(), 0, 1);
-    const end = new Date(d.getFullYear() + 1, 0, 1);
-    return { start, end, label: String(start.getFullYear()) };
+    const start = businessYearStart(businessDateString(d));
+    return {
+      start: businessDayStart(start),
+      end: businessDayStart(nextYearStart(start)),
+      label: start.slice(0, 4),
+    };
   }
 
-  private buildReceiptText(
-    sale: Prisma.SaleGetPayload<{ include: { lines: { include: { product: true } } } }>,
-  ) {
+  private buildReceiptText(sale: {
+    saleNumber: string;
+    grandTotal: string;
+    lines: { product: { name: string }; quantity: string; unitPrice: string; lineTotal: string }[];
+  }) {
     const lines = sale.lines
-      .map(
-        (l) =>
-          `${l.product.name} x${l.quantity.toString()} @ ${l.unitPrice.toFixed(2)} = ${l.lineTotal.toFixed(2)}`,
-      )
+      .map((l) => `${l.product.name} x${l.quantity} @ ${l.unitPrice} = ${l.lineTotal}`)
       .join("\n");
     return [
       "Edi's Collection",
@@ -547,7 +746,7 @@ export class SalesService {
       "----------------",
       lines,
       "----------------",
-      `Total: ${sale.grandTotal.toFixed(2)}`,
+      `Total: ${sale.grandTotal}`,
     ].join("\n");
   }
 }

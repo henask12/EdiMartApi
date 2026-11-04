@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
-import { ReservationStatus } from "@prisma/client";
+import { PermissionKey, ReservationStatus } from "@prisma/client";
+import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { CASHIER_ROLE, OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import { IsEnum, IsOptional, IsString } from "class-validator";
 import { Roles } from "../common/decorators/roles.decorator";
@@ -37,6 +38,7 @@ type Authed = { user: { userId: string } };
 export class ReservationsController {
   constructor(private readonly reservations: ReservationsService) {}
 
+  @RequirePermissions(PermissionKey.RESERVATIONS_MANAGE)
   @Get()
   list(
     @Query("status") status?: ReservationStatus,

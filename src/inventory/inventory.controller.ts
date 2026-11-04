@@ -1,23 +1,10 @@
 import { Body, Controller, Get, Post, Query, Req } from "@nestjs/common";
+import { PermissionKey } from "@prisma/client";
+import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { CASHIER_ROLE, OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import { Roles } from "../common/decorators/roles.decorator";
 import { InventoryService } from "./inventory.service";
 import { IsOptional, IsString, MinLength } from "class-validator";
-
-class ReceiveDto {
-  @IsString()
-  productId!: string;
-
-  @IsString()
-  quantity!: string;
-
-  @IsString()
-  unitCost!: string;
-
-  @IsOptional()
-  @IsString()
-  notes?: string;
-}
 
 class AdjustDto {
   @IsString()
@@ -65,6 +52,7 @@ export class InventoryController {
     });
   }
 
+  @RequirePermissions(PermissionKey.STOCK_HISTORY_VIEW)
   @Get("movements")
   listMovements(
     @Query("productId") productId?: string,
@@ -76,12 +64,6 @@ export class InventoryController {
       skip: skip ? Number(skip) : undefined,
       take: take ? Number(take) : undefined,
     });
-  }
-
-  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
-  @Post("receive")
-  receive(@Req() req: Authed, @Body() body: ReceiveDto) {
-    return this.inventory.receiveGoods(req.user.userId, body);
   }
 
   @Roles(OWNER_ROLE, STORE_STAFF_ROLE)

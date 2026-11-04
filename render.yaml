@@ -16,8 +16,16 @@ services:
         sync: false
       - key: JWT_SECRET
         generateValue: true
+      - key: SETUP_ENABLED
+        value: "0"
       - key: SETUP_SECRET
         generateValue: true
+      - key: ADMIN_INITIAL_PASSWORD
+        sync: false
+      - key: SESSION_TTL_HOURS
+        value: "8"
+      - key: STORAGE_DRIVER
+        value: local
       - key: PUBLIC_API_URL
         sync: false
       - key: UPLOAD_DIR

@@ -21,6 +21,10 @@ import { AppController } from "./app.controller";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 import { PermissionsGuard } from "./common/guards/permissions.guard";
+import { MustChangePasswordGuard } from "./common/guards/must-change-password.guard";
+import { StorageModule } from "./storage/storage.module";
+import { SetupModule } from "./setup/setup.module";
+import { isSetupEnabled } from "./setup/setup.config";
 import { PermissionsModule } from "./permissions/permissions.module";
 
 @Module({
@@ -31,6 +35,7 @@ import { PermissionsModule } from "./permissions/permissions.module";
       envFilePath: [".env"],
     }),
     PrismaModule,
+    StorageModule,
     PermissionsModule,
     AuditModule,
     UsersModule,
@@ -47,9 +52,12 @@ import { PermissionsModule } from "./permissions/permissions.module";
     ReportingModule,
     NotificationsModule,
     HealthModule,
+    // First-run seeding endpoints; absent (404) unless SETUP_ENABLED is on.
+    ...(isSetupEnabled() ? [SetupModule] : []),
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: MustChangePasswordGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],

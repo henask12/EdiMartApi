@@ -1,7 +1,9 @@
-import { Body, Controller, Get, Patch, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import { AuthService } from "./auth.service";
 import { Public } from "../common/decorators/public.decorator";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
+import { AllowPasswordChange } from "../common/decorators/allow-password-change.decorator";
+import { LoginThrottlerGuard } from "./login-throttler.guard";
 import { IsEmail, IsOptional, IsString, MinLength } from "class-validator";
 
 class LoginDto {
@@ -29,7 +31,7 @@ class ChangePasswordDto {
   currentPassword!: string;
 
   @IsString()
-  @MinLength(6)
+  @MinLength(8)
   newPassword!: string;
 }
 
@@ -38,11 +40,14 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Public()
+  @UseGuards(LoginThrottlerGuard)
+  @HttpCode(200)
   @Post("login")
   login(@Body() body: LoginDto) {
     return this.auth.login(body.email, body.password);
   }
 
+  @AllowPasswordChange()
   @UseGuards(JwtAuthGuard)
   @Get("me")
   me(
@@ -54,6 +59,7 @@ export class AuthController {
         roleName: string;
         displayName: string | null;
         permissions: string[];
+        mustChangePassword: boolean;
       };
     },
   ) {
@@ -63,6 +69,7 @@ export class AuthController {
       displayName: req.user.displayName,
       role: req.user.roleName,
       permissions: req.user.permissions,
+      mustChangePassword: req.user.mustChangePassword,
     };
   }
 
@@ -75,6 +82,7 @@ export class AuthController {
     return this.auth.updateProfile(req.user.userId, body);
   }
 
+  @AllowPasswordChange()
   @UseGuards(JwtAuthGuard)
   @Post("change-password")
   changePassword(

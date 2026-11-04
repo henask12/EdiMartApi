@@ -79,6 +79,7 @@ model User {
   passwordHash    String
   displayName     String?
   isActive        Boolean          @default(true)
+  mustChangePassword Boolean       @default(false)
   roleId          String
   role            Role             @relation(fields: [roleId], references: [id])
   createdAt       DateTime         @default(now())
@@ -144,6 +145,7 @@ model Product {
   reservations  Reservation[]
 
   @@unique([categoryId, name])
+  @@index([expiryDate])
 }
 
 model Location {
@@ -224,6 +226,7 @@ model Reservation {
 
   @@index([productId, status])
   @@index([status])
+  @@index([status, expiresAt])
 }
 
 model Sale {
@@ -272,6 +275,10 @@ enum PaymentMethod {
   CASH
   CARD
   MOBILE_MONEY
+  TELEBIRR
+  CBE_BIRR
+  MPESA
+  BANK_TRANSFER
 }
 
 model PaymentAllocation {
@@ -280,6 +287,7 @@ model PaymentAllocation {
   sale   Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
   method PaymentMethod
   amount Decimal       @db.Decimal(12, 2)
+  reference String?
 }
 
 model NotificationEmail {
@@ -296,4 +304,28 @@ model NotificationLog {
   body      String
   sentAt    DateTime         @default(now())
   metadata  Json?
+}
+
+/// Per-scope, per-business-day counters (sale numbers, and later returns, POs, shifts).
+model DocumentCounter {
+  scope String
+  /// Business-time calendar date, YYYY-MM-DD (Africa/Addis_Ababa).
+  date  String
+  value Int    @default(0)
+
+  @@id([scope, date])
+}
+
+/// Makes retried write requests (checkout) safe: the same key returns the original result.
+model IdempotencyKey {
+  id          String   @id @default(cuid())
+  scope       String
+  key         String
+  requestHash String
+  userId      String
+  saleId      String?
+  createdAt   DateTime @default(now())
+
+  @@unique([scope, key])
+  @@index([createdAt])
 }
