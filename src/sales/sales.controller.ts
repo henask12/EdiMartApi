@@ -275,12 +275,20 @@ export class SalesController {
     @Body() body: CheckoutDto,
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-approval-token") approvalToken?: string,
+    @Headers("x-register-id") registerId?: string,
   ) {
     const key = idempotencyKey?.trim();
     if (!key || key.length < 8 || key.length > 128) {
       throw new BadRequestException("Idempotency-Key header is required (8-128 characters)");
     }
-    return this.sales.checkout(req.user, body, key, viewerFor(req.user), approvalToken?.trim());
+    return this.sales.checkout(
+      req.user,
+      body,
+      key,
+      viewerFor(req.user),
+      approvalToken?.trim(),
+      registerId?.trim(),
+    );
   }
 
   @RequireAnyPermission(PermissionKey.SALES_VIEW, PermissionKey.SALES_VIEW_OWN, PermissionKey.SALES_VIEW_ALL)

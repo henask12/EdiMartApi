@@ -110,6 +110,18 @@ const RULES: Rule[] = [
   { method: "delete", path: "/settings/notification-emails/some-id", all: [K.SETTINGS_EMAILS] },
   { method: "get", path: "/settings/store", all: [K.SETTINGS_MANAGE] },
   { method: "patch", path: "/settings/store", all: [K.SETTINGS_MANAGE] },
+  { method: "post", path: "/registers", all: [K.SETTINGS_MANAGE] },
+  { method: "patch", path: "/registers/some-id", all: [K.SETTINGS_MANAGE] },
+  { method: "get", path: "/shifts", any: [K.SHIFT_MANAGE, K.SHIFT_VIEW_ALL] },
+  { method: "get", path: "/shifts/current", all: [K.SHIFT_MANAGE] },
+  { method: "post", path: "/shifts/open", all: [K.SHIFT_MANAGE] },
+  { method: "get", path: "/shifts/some-id/x-report", any: [K.SHIFT_MANAGE, K.SHIFT_VIEW_ALL] },
+  { method: "get", path: "/shifts/some-id/z-report", any: [K.SHIFT_MANAGE, K.SHIFT_VIEW_ALL] },
+  { method: "post", path: "/shifts/some-id/cash-in", all: [K.SHIFT_MANAGE] },
+  { method: "post", path: "/shifts/some-id/cash-out", all: [K.SHIFT_MANAGE] },
+  { method: "post", path: "/shifts/some-id/no-sale", all: [K.SHIFT_MANAGE] },
+  { method: "post", path: "/shifts/some-id/close", all: [K.SHIFT_MANAGE] },
+  { method: "get", path: "/shifts/some-id", any: [K.SHIFT_MANAGE, K.SHIFT_VIEW_ALL] },
   { method: "get", path: "/users", all: [K.USERS_MANAGE] },
   { method: "post", path: "/users", all: [K.USERS_MANAGE] },
   { method: "patch", path: "/users/some-id", all: [K.USERS_MANAGE] },
@@ -134,6 +146,7 @@ const ANY_SIGNED_IN: Pick<Rule, "method" | "path">[] = [
   { method: "post", path: "/approvals" },
   { method: "get", path: "/locations" },
   { method: "get", path: "/locations/some-id" },
+  { method: "get", path: "/registers" },
 ];
 
 describe("one permission model", () => {

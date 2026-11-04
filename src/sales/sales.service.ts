@@ -41,6 +41,7 @@ import { hasPermission, type Viewer } from "../permissions/access";
 import type { Actor } from "../permissions/permissions.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { StoreSettingsService } from "../settings/store-settings.service";
+import { ShiftsService } from "../shifts/shifts.service";
 import { StorageService } from "../storage/storage.service";
 import { FiscalService } from "./fiscal.service";
 
@@ -165,6 +166,7 @@ export class SalesService {
     private readonly settings: StoreSettingsService,
     private readonly approvals: ApprovalsService,
     private readonly fiscal: FiscalService,
+    private readonly shifts: ShiftsService,
   ) {}
 
   private receiptSecret() {
@@ -418,6 +420,7 @@ export class SalesService {
     idempotencyKey: string,
     viewer: Viewer,
     approvalToken?: string,
+    registerId?: string,
   ) {
     if (!input.lines?.length) {
       throw new BadRequestException("Add at least one product");
@@ -428,6 +431,7 @@ export class SalesService {
     const requestHash = this.hashRequest(input);
     const defaultLoc = await this.locations.getDefault();
     await this.ensureSaleCounter(businessDateString());
+    const shiftId = await this.shifts.resolveShiftForCheckout(actor, registerId);
 
     let outcome: { saleId: string; replayed: boolean } | undefined;
     for (let attempt = 1; attempt <= MAX_CHECKOUT_ATTEMPTS; attempt += 1) {
@@ -442,6 +446,7 @@ export class SalesService {
               requestHash,
               defaultLoc.id,
               approvalToken,
+              shiftId,
             ),
           {
             isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
@@ -532,11 +537,26 @@ export class SalesService {
     requestHash: string,
     locationId: string,
     approvalToken?: string,
+    shiftId?: string | null,
   ): Promise<{ saleId: string; replayed: boolean }> {
     const userId = actor.userId;
     const productIds = [...new Set(input.lines.map((l) => l.productId))];
 
     await lockInventoryRows(tx, productIds, locationId);
+
+    if (shiftId) {
+      const open = await tx.shift.findFirst({
+        where: { id: shiftId, status: "OPEN" },
+      });
+      if (!open) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          error: "Forbidden",
+          code: "SHIFT_REQUIRED",
+          message: "Open a shift before selling",
+        });
+      }
+    }
 
     const existingKey = await tx.idempotencyKey.findUnique({
       where: { scope_key: { scope: CHECKOUT_SCOPE, key: idempotencyKey } },
@@ -917,6 +937,7 @@ export class SalesService {
         notes: input.notes?.trim() || null,
         discountReason: input.discountReason?.trim() || null,
         createdByUserId: userId,
+        shiftId: shiftId ?? null,
         lines: {
           create: computed.map((l) => ({
             productId: l.productId,

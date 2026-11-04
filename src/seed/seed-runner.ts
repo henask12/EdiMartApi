@@ -103,6 +103,18 @@ export const runSeed = async (prisma: PrismaClient, options: SeedOptions = {}) =
     create: { code: "QUARANTINE", name: "Quarantine", sellable: false, storeCode: "DEFAULT_STORE", sortOrder: 20 },
   });
 
+  await prisma.register.upsert({
+    where: { code: "REGISTER-1" },
+    update: { name: "Main till", isActive: true },
+    create: {
+      id: "reg_default_phase5",
+      code: "REGISTER-1",
+      name: "Main till",
+      storeCode: "DEFAULT_STORE",
+      isActive: true,
+    },
+  });
+
   await prisma.user.create({
     data: {
       email: adminEmail,

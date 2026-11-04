@@ -27,6 +27,7 @@ export const APPROVAL_ACTIONS = {
   SALE_VOID: PermissionKey.SALES_VOID,
   REFUND_OUTSIDE_WINDOW: PermissionKey.SALES_REFUND,
   NO_SALE_DRAWER_OPEN: PermissionKey.CASH_DRAWER_OPEN,
+  SHIFT_VARIANCE_OVER_LIMIT: PermissionKey.SHIFT_VIEW_ALL,
 } as const;
 
 export type ApprovalAction = keyof typeof APPROVAL_ACTIONS;

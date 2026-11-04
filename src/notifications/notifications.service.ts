@@ -51,6 +51,11 @@ export class NotificationsService {
     });
   }
 
+  /** Best-effort outbound mail used by shifts EOD and similar callers. */
+  async sendTypedMail(subject: string, html: string, type: NotificationType, metadata?: object) {
+    return this.sendMail(subject, html, type, metadata);
+  }
+
   private async sendMail(subject: string, html: string, type: NotificationType, metadata?: object) {
     const to = (await this.recipients()).map((r) => r.email);
     if (!to.length) {

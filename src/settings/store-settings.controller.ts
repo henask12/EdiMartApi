@@ -66,6 +66,18 @@ class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   labelAsTaxInvoice?: string;
+
+  @IsOptional()
+  @IsString()
+  requireOpenShift?: string;
+
+  @IsOptional()
+  @IsString()
+  varianceApprovalThreshold?: string;
+
+  @IsOptional()
+  @IsString()
+  eodEmailEnabled?: string;
 }
 
 @Controller("settings/store")

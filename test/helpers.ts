@@ -52,6 +52,21 @@ export const seedBasics = async (prisma: PrismaClient) => {
   await prisma.location.create({
     data: { code: "QUARANTINE", name: "Quarantine", sellable: false, storeCode: "DEFAULT_STORE", sortOrder: 20 },
   });
+  await prisma.register.upsert({
+    where: { code: "REGISTER-1" },
+    update: {},
+    create: {
+      id: "reg_default_phase5",
+      code: "REGISTER-1",
+      name: "Main till",
+      storeCode: "DEFAULT_STORE",
+      isActive: true,
+    },
+  });
+  // Phase 5 default is requireOpenShift=true; keep checkout suites independent unless a test opts in.
+  await prisma.storeSetting.create({
+    data: { key: "shifts.requireOpenShift", value: "false" },
+  });
   const hash = await bcrypt.hash(PASSWORD, 4);
   const users: Record<string, { id: string; email: string }> = {};
   for (const name of BUILTIN_ROLES) {

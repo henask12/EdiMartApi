@@ -48,6 +48,7 @@ const cashierPermissions: PermissionKey[] = [
   PermissionKey.SALES_EXPORT,
   PermissionKey.RESERVATIONS_MANAGE,
   PermissionKey.REPORTING_VIEW,
+  PermissionKey.SHIFT_MANAGE,
 ];
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {

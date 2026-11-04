@@ -33,6 +33,9 @@ export const SETTING_DEFAULTS = {
   "pos.paymentMethods": DEFAULT_POS_PAYMENT_METHODS,
   "pos.cashDenominations": "[50,100,200,500,1000]",
   "pos.labelAsTaxInvoice": "false",
+  "shifts.requireOpenShift": "true",
+  "shifts.varianceApprovalThreshold": "100",
+  "shifts.eodEmailEnabled": "true",
 } as const;
 
 export type SettingKey = keyof typeof SETTING_DEFAULTS;
@@ -54,6 +57,9 @@ const UPDATE_ALIASES: Record<string, SettingKey> = {
   paymentMethods: "pos.paymentMethods",
   cashDenominations: "pos.cashDenominations",
   labelAsTaxInvoice: "pos.labelAsTaxInvoice",
+  requireOpenShift: "shifts.requireOpenShift",
+  varianceApprovalThreshold: "shifts.varianceApprovalThreshold",
+  eodEmailEnabled: "shifts.eodEmailEnabled",
 };
 
 export type StoreSettingsUpdate = Partial<Record<SettingKey, string>> & {
@@ -72,6 +78,9 @@ export type StoreSettingsUpdate = Partial<Record<SettingKey, string>> & {
   paymentMethods?: string;
   cashDenominations?: string;
   labelAsTaxInvoice?: string;
+  requireOpenShift?: string;
+  varianceApprovalThreshold?: string;
+  eodEmailEnabled?: string;
 };
 
 @Injectable()
@@ -139,7 +148,12 @@ export class StoreSettingsService {
       resolved.set("inventory.adjustmentApprovalThreshold", value.toString());
     }
 
-    for (const numericKey of ["pos.vatRate", "pos.discountLimitPercent", "pos.returnWindowDays"] as SettingKey[]) {
+    for (const numericKey of [
+      "pos.vatRate",
+      "pos.discountLimitPercent",
+      "pos.returnWindowDays",
+      "shifts.varianceApprovalThreshold",
+    ] as SettingKey[]) {
       if (!resolved.has(numericKey)) {
         continue;
       }
@@ -153,6 +167,17 @@ export class StoreSettingsService {
         throw new BadRequestException(`${numericKey} cannot be negative`);
       }
       resolved.set(numericKey, value.toString());
+    }
+
+    for (const boolKey of ["shifts.requireOpenShift", "shifts.eodEmailEnabled"] as SettingKey[]) {
+      if (!resolved.has(boolKey)) {
+        continue;
+      }
+      const raw = resolved.get(boolKey)!.trim().toLowerCase();
+      if (raw !== "true" && raw !== "false") {
+        throw new BadRequestException(`${boolKey} must be "true" or "false"`);
+      }
+      resolved.set(boolKey, raw);
     }
 
     for (const jsonKey of ["pos.favourites", "pos.paymentMethods", "pos.cashDenominations"] as SettingKey[]) {

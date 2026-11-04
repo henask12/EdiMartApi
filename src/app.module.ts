@@ -11,6 +11,7 @@ import { ProductTypesModule } from "./product-types/product-types.module";
 import { ExportModule } from "./export/export.module";
 import { InventoryModule } from "./inventory/inventory.module";
 import { SalesModule } from "./sales/sales.module";
+import { ShiftsModule } from "./shifts/shifts.module";
 import { ReservationsModule } from "./reservations/reservations.module";
 import { ReportingModule } from "./reporting/reporting.module";
 import { NotificationsModule } from "./notifications/notifications.module";
@@ -50,6 +51,7 @@ import { PermissionsModule } from "./permissions/permissions.module";
     CatalogModule,
     UploadsModule,
     InventoryModule,
+    ShiftsModule,
     SalesModule,
     ReservationsModule,
     ReportingModule,

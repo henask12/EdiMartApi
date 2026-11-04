@@ -1,5 +1,30 @@
 # Changelog
 
+## Phase 5 — Shifts and cash control (API)
+
+### Added
+- **Registers**: `GET /registers` (any signed-in user), `POST/PATCH /registers`
+  (`SETTINGS_MANAGE`). Default till `REGISTER-1` from migration + seed upsert.
+- **Shifts**: open / list / current / get; cash-in, cash-out, no-sale (log only, no
+  hardware kick); blind close with counted vs expected variance; X and Z reports
+  (printable JSON). Numbering `SHF-YYYYMMDD-NNNN` via `DocumentCounter` scope `SHIFT`.
+- **Settings**: `shifts.requireOpenShift` (default `"true"`),
+  `shifts.varianceApprovalThreshold` (default `"100"` Birr),
+  `shifts.eodEmailEnabled` (default `"true"`).
+- **Checkout gate**: when require-open-shift is on, checkout needs an open shift for
+  the actor (optional `x-register-id` header); sets `Sale.shiftId`. Proxy allowlist
+  includes `x-register-id`.
+- **Approvals**: `SHIFT_VARIANCE_OVER_LIMIT` → `SHIFT_VIEW_ALL`; no-sale uses existing
+  `NO_SALE_DRAWER_OPEN` → `CASH_DRAWER_OPEN`.
+- **EOD**: best-effort Resend email on close (`NotificationType.SHIFT_EOD`); Telegram
+  stub logs only.
+- Permissions **active**: `CASH_DRAWER_OPEN`, `SHIFT_MANAGE`, `SHIFT_VIEW_ALL`.
+  Cashier role defaults gain `SHIFT_MANAGE` (not drawer open / view-all).
+
+### Database (additive only)
+- Migration `20261104160000_phase5_shifts`: `Register`, `Shift`, `CashMovement`,
+  `ShiftCount`, `Sale.shiftId`, enums, default `REGISTER-1`, `NotificationType.SHIFT_EOD`.
+
 ## Phase 4 — POS selling core (API)
 
 ### Added

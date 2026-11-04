@@ -70,9 +70,9 @@ const spec: Record<PermissionKey, Spec> = {
   [P.PRICE_OVERRIDE]: { group: "Sales", description: "Change the price of an item during a sale.", sensitive: true },
 
   // Cash and shifts
-  [P.CASH_DRAWER_OPEN]: { group: "Cash and shifts", description: "Open the cash drawer without a sale.", sensitive: true, status: "planned", plannedPhase: 5 },
-  [P.SHIFT_MANAGE]: { group: "Cash and shifts", description: "Open and close a shift and count the cash drawer.", status: "planned", plannedPhase: 5 },
-  [P.SHIFT_VIEW_ALL]: { group: "Cash and shifts", description: "See every cashier's shifts and cash variances.", sensitive: true, status: "planned", plannedPhase: 5 },
+  [P.CASH_DRAWER_OPEN]: { group: "Cash and shifts", description: "Open the cash drawer without a sale.", sensitive: true },
+  [P.SHIFT_MANAGE]: { group: "Cash and shifts", description: "Open and close a shift and count the cash drawer." },
+  [P.SHIFT_VIEW_ALL]: { group: "Cash and shifts", description: "See every cashier's shifts and cash variances.", sensitive: true },
 
   // Customers
   [P.CUSTOMERS_VIEW]: { group: "Customers", description: "See customers and their purchase history.", status: "planned", plannedPhase: 7 },
