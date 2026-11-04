@@ -1,5 +1,46 @@
 # Changelog
 
+## Phase 6 — Purchasing, suppliers and replenishment (API)
+
+### Added
+- **Suppliers**: `GET/POST /suppliers`, `GET/PATCH /suppliers/:id`, catalogue
+  `GET/POST /suppliers/:id/products` (packSize always 1), cost history on link/update.
+  List/read: `PRODUCTS_VIEW` or `SUPPLIERS_MANAGE`; writes: `SUPPLIERS_MANAGE`.
+- **Purchase orders**: CRUD draft lines; `POST …/approve|send|cancel|close`.
+  Numbering `PO-YYYYMMDD-NNNN`. Status
+  DRAFT→APPROVED→SENT→PARTIALLY_RECEIVED→RECEIVED→CLOSED (+ CANCELLED).
+  Approve above `purchasing.poApproveThreshold` (default `"10000"`) needs
+  `PURCHASE_APPROVE` (owner always may). Send returns structured JSON for PDF/email;
+  Telegram is a stub log.
+- **Goods receipts**: `POST /goods-receipts` against a PO — StockBatch + RECEIPT
+  movement + WAC (same math as `inventory.receiveGoods`); updates PO line received
+  qty and status. `POST /goods-receipts/:id/landed-costs` allocates by VALUE or
+  QUANTITY, sets `landedUnitCost`, updates batch unit cost and incremental WAC.
+  Numbering `GR-YYYYMMDD-NNNN`.
+- **Incoming**: `GET /purchasing/incoming?productId=`; also on
+  `GET /inventory/lookup` as `incoming` (open POs: APPROVED/SENT/PARTIALLY_RECEIVED).
+- **Bills / payables**: `POST/GET /supplier-bills`, payments, `GET …/aged-payables`.
+  Numbering `BILL-YYYYMMDD-NNNN`. Permission `SUPPLIER_PAYMENTS_MANAGE`.
+- **Supplier returns**: create + complete (SUPPLIER_RETURN movement, reduce on-hand/
+  batch) + cancel. Numbering `SRET-YYYYMMDD-NNNN`.
+- **Reorder planner**: `GET /purchasing/reorder-suggestions`,
+  `POST /purchasing/reorder-suggestions/create-pos` (draft PO). Seasonality uplift off.
+- **Settings**: `purchasing.poApproveThreshold` (+ camelCase `poApproveThreshold`).
+- Permissions **active**: `SUPPLIERS_MANAGE`, `PURCHASING_MANAGE`, `PURCHASE_APPROVE`,
+  `SUPPLIER_PAYMENTS_MANAGE`. STORE_STAFF defaults gain SUPPLIERS_MANAGE +
+  PURCHASING_MANAGE (not approve / payments). Cost fields omitted without
+  `REPORTS_VIEW_COST_PROFIT`.
+
+### Database (additive only)
+- Migration `20261104180000_phase6_purchasing`: Supplier, SupplierProduct,
+  SupplierCostHistory, PurchaseOrder(+Line), GoodsReceipt(+Line), LandedCost,
+  SupplierBill(+Receipt link), SupplierPayment, SupplierReturn(+Line),
+  `MovementType.SUPPLIER_RETURN`, related enums. ETB only; packSize default 1.
+
+### Defaults (owner-approved for this phase)
+- No pack/carton conversion; ETB only; PO approve threshold Br 10 000; seasonality
+  uplift off; incoming from APPROVED/SENT/PARTIALLY_RECEIVED.
+
 ## Phase 5 — Shifts and cash control (API)
 
 ### Added

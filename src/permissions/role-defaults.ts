@@ -35,6 +35,8 @@ const staffPermissions: PermissionKey[] = [
   PermissionKey.SALES_EXPORT,
   PermissionKey.RESERVATIONS_MANAGE,
   PermissionKey.REPORTING_VIEW,
+  PermissionKey.SUPPLIERS_MANAGE,
+  PermissionKey.PURCHASING_MANAGE,
 ];
 
 const cashierPermissions: PermissionKey[] = [

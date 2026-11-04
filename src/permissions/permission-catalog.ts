@@ -81,10 +81,10 @@ const spec: Record<PermissionKey, Spec> = {
   [P.PROMOTIONS_MANAGE]: { group: "Customers", description: "Create and edit promotions and coupons.", status: "planned", plannedPhase: 7 },
 
   // Purchasing
-  [P.SUPPLIERS_MANAGE]: { group: "Purchasing", description: "Add and edit suppliers.", status: "planned", plannedPhase: 6 },
-  [P.PURCHASING_MANAGE]: { group: "Purchasing", description: "Create purchase orders and receive against them.", status: "planned", plannedPhase: 6 },
-  [P.PURCHASE_APPROVE]: { group: "Purchasing", description: "Approve large purchase orders.", sensitive: true, status: "planned", plannedPhase: 6 },
-  [P.SUPPLIER_PAYMENTS_MANAGE]: { group: "Purchasing", description: "Record supplier bills and payments.", sensitive: true, status: "planned", plannedPhase: 6 },
+  [P.SUPPLIERS_MANAGE]: { group: "Purchasing", description: "Add and edit suppliers." },
+  [P.PURCHASING_MANAGE]: { group: "Purchasing", description: "Create purchase orders and receive against them." },
+  [P.PURCHASE_APPROVE]: { group: "Purchasing", description: "Approve large purchase orders.", sensitive: true },
+  [P.SUPPLIER_PAYMENTS_MANAGE]: { group: "Purchasing", description: "Record supplier bills and payments.", sensitive: true },
 
   // Reports
   [P.REPORTING_VIEW]: { group: "Reports", description: "See the dashboard and sales reports (without cost and profit)." },

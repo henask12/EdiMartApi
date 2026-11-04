@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
-import { AdjustReason, MovementType, PermissionKey, Prisma } from "@prisma/client";
+import { AdjustReason, MovementType, PermissionKey, Prisma, PurchaseOrderStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { LocationsService } from "../locations/locations.service";
 import { AuditService } from "../audit/audit.service";
@@ -815,6 +815,7 @@ export class InventoryService {
       product.id,
       sellableIds,
     );
+    const incoming = await this.incomingFromOpenPos(product.id);
     const locationById = new Map(
       (
         await this.prisma.location.findMany({
@@ -833,6 +834,7 @@ export class InventoryService {
       onHand: totalOnHand.toString(),
       reserved: reserved.toString(),
       available: available.toString(),
+      incoming: incoming.toString(),
       byLocation: inventoryItems.map((i) => ({
         locationId: i.locationId,
         code: i.location.code,
@@ -850,6 +852,29 @@ export class InventoryService {
         ...(includeCost ? { unitCost: b.unitCost.toString() } : {}),
       })),
     };
+  }
+
+  /** Remaining qty on APPROVED / SENT / PARTIALLY_RECEIVED POs (Phase 6). */
+  private async incomingFromOpenPos(productId: string): Promise<Prisma.Decimal> {
+    const lines = await this.prisma.purchaseOrderLine.findMany({
+      where: {
+        productId,
+        purchaseOrder: {
+          status: {
+            in: [
+              PurchaseOrderStatus.APPROVED,
+              PurchaseOrderStatus.SENT,
+              PurchaseOrderStatus.PARTIALLY_RECEIVED,
+            ],
+          },
+        },
+      },
+      select: { quantityOrdered: true, quantityReceived: true },
+    });
+    return lines.reduce((acc, l) => {
+      const remaining = l.quantityOrdered.sub(l.quantityReceived);
+      return remaining.gt(0) ? acc.add(remaining) : acc;
+    }, new Prisma.Decimal(0));
   }
 
   /**

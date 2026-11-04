@@ -36,6 +36,8 @@ export const SETTING_DEFAULTS = {
   "shifts.requireOpenShift": "true",
   "shifts.varianceApprovalThreshold": "100",
   "shifts.eodEmailEnabled": "true",
+  /** PO subtotal (Birr) above this needs PURCHASE_APPROVE (or owner). */
+  "purchasing.poApproveThreshold": "10000",
 } as const;
 
 export type SettingKey = keyof typeof SETTING_DEFAULTS;
@@ -60,6 +62,7 @@ const UPDATE_ALIASES: Record<string, SettingKey> = {
   requireOpenShift: "shifts.requireOpenShift",
   varianceApprovalThreshold: "shifts.varianceApprovalThreshold",
   eodEmailEnabled: "shifts.eodEmailEnabled",
+  poApproveThreshold: "purchasing.poApproveThreshold",
 };
 
 export type StoreSettingsUpdate = Partial<Record<SettingKey, string>> & {
@@ -81,6 +84,7 @@ export type StoreSettingsUpdate = Partial<Record<SettingKey, string>> & {
   requireOpenShift?: string;
   varianceApprovalThreshold?: string;
   eodEmailEnabled?: string;
+  poApproveThreshold?: string;
 };
 
 @Injectable()
@@ -104,6 +108,11 @@ export class StoreSettingsService {
   async getAdjustmentThreshold(): Promise<Prisma.Decimal> {
     const all = await this.getAll();
     return new Prisma.Decimal(all["inventory.adjustmentApprovalThreshold"]);
+  }
+
+  async getPoApproveThreshold(): Promise<Prisma.Decimal> {
+    const all = await this.getAll();
+    return new Prisma.Decimal(all["purchasing.poApproveThreshold"] || "10000");
   }
 
   async getPosNumber(key: SettingKey, fallback: string): Promise<Prisma.Decimal> {
@@ -153,6 +162,7 @@ export class StoreSettingsService {
       "pos.discountLimitPercent",
       "pos.returnWindowDays",
       "shifts.varianceApprovalThreshold",
+      "purchasing.poApproveThreshold",
     ] as SettingKey[]) {
       if (!resolved.has(numericKey)) {
         continue;

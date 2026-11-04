@@ -82,6 +82,7 @@ enum MovementType {
   DAMAGE
   WRITE_OFF
   COUNT
+  SUPPLIER_RETURN
 }
 
 enum TaxCategory {
@@ -191,6 +192,13 @@ model User {
   shiftsClosed       Shift[]              @relation("ShiftClosedBy")
   cashMovements      CashMovement[]
   registersCreated   Register[]           @relation("RegisterCreatedBy")
+  suppliersCreated   Supplier[]           @relation("SupplierCreatedBy")
+  purchaseOrders     PurchaseOrder[]      @relation("PoCreatedBy")
+  purchaseOrdersApproved PurchaseOrder[]  @relation("PoApprovedBy")
+  goodsReceipts      GoodsReceipt[]       @relation("GrCreatedBy")
+  supplierBills      SupplierBill[]       @relation("BillCreatedBy")
+  supplierPayments   SupplierPayment[]    @relation("PaymentCreatedBy")
+  supplierReturns    SupplierReturn[]     @relation("SupplierReturnCreatedBy")
 }
 
 model AuditLog {
@@ -267,6 +275,11 @@ model Product {
   countLines    StockCountLine[]
   snapshots     InventorySnapshot[]
   creditNoteLines CreditNoteLine[]
+  supplierProducts SupplierProduct[]
+  purchaseOrderLines PurchaseOrderLine[]
+  goodsReceiptLines GoodsReceiptLine[]
+  supplierCostHistory SupplierCostHistory[]
+  supplierReturnLines SupplierReturnLine[]
 
   @@unique([categoryId, name])
   @@index([expiryDate])
@@ -304,6 +317,8 @@ model Location {
   defaultForProducts Product[]   @relation("ProductDefaultLocation")
   snapshots      InventorySnapshot[]
   creditRestocks CreditNoteLine[]
+  goodsReceiptLines GoodsReceiptLine[]
+  supplierReturnLines SupplierReturnLine[]
   createdAt      DateTime        @default(now())
 
   @@index([storeCode, sellable])
@@ -841,4 +856,270 @@ model ShiftCount {
   createdAt   DateTime       @default(now())
 
   @@index([shiftId, kind])
+}
+
+// ─── Phase 6: Purchasing ─────────────────────────────────────────────────────
+
+enum PurchaseOrderStatus {
+  DRAFT
+  APPROVED
+  SENT
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CLOSED
+  CANCELLED
+}
+
+enum SupplierBillStatus {
+  OPEN
+  PARTIAL
+  PAID
+  VOID
+}
+
+enum SupplierReturnStatus {
+  DRAFT
+  SENT
+  COMPLETED
+  CANCELLED
+}
+
+model Supplier {
+  id              String   @id @default(cuid())
+  name            String
+  contactName     String?
+  phone           String?
+  telegram        String?
+  email           String?
+  address         String?
+  tin             String?
+  paymentTerms    String?
+  leadTimeDays    Int      @default(7)
+  minimumOrder    Decimal  @db.Decimal(12, 2) @default(0)
+  /// ETB only in Phase 6 (no multi-currency).
+  currency        String   @default("ETB")
+  notes           String?
+  isActive        Boolean  @default(true)
+  createdByUserId String?
+  createdBy       User?    @relation("SupplierCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  products        SupplierProduct[]
+  purchaseOrders  PurchaseOrder[]
+  bills           SupplierBill[]
+  returns         SupplierReturn[]
+  costHistory     SupplierCostHistory[]
+
+  @@index([isActive, name])
+}
+
+model SupplierProduct {
+  id              String   @id @default(cuid())
+  supplierId      String
+  supplier        Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  supplierSku     String?
+  /// Pack size in base sell units (Phase 6: always 1 — no carton conversion yet).
+  packSize        Int      @default(1)
+  lastCost        Decimal  @db.Decimal(14, 4) @default(0)
+  isPreferred     Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([supplierId, productId])
+  @@index([productId])
+}
+
+model SupplierCostHistory {
+  id         String   @id @default(cuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  unitCost   Decimal  @db.Decimal(14, 4)
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([supplierId, productId, createdAt])
+}
+
+model PurchaseOrder {
+  id               String              @id @default(cuid())
+  poNumber         String              @unique
+  status           PurchaseOrderStatus @default(DRAFT)
+  supplierId       String
+  supplier         Supplier            @relation(fields: [supplierId], references: [id])
+  notes            String?
+  expectedAt       DateTime?
+  subtotal         Decimal             @db.Decimal(12, 2) @default(0)
+  createdByUserId  String
+  createdBy        User                @relation("PoCreatedBy", fields: [createdByUserId], references: [id])
+  approvedByUserId String?
+  approvedBy       User?               @relation("PoApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedAt       DateTime?
+  sentAt           DateTime?
+  closedAt         DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  lines            PurchaseOrderLine[]
+  receipts         GoodsReceipt[]
+  bills            SupplierBill[]
+
+  @@index([status, createdAt])
+  @@index([supplierId, status])
+}
+
+model PurchaseOrderLine {
+  id             String        @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder  PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product       @relation(fields: [productId], references: [id])
+  /// Quantity in base sell units.
+  quantityOrdered Decimal      @db.Decimal(18, 4)
+  quantityReceived Decimal     @db.Decimal(18, 4) @default(0)
+  unitCost       Decimal       @db.Decimal(14, 4)
+  lineTotal      Decimal       @db.Decimal(12, 2)
+
+  @@index([purchaseOrderId])
+  @@index([productId])
+}
+
+model GoodsReceipt {
+  id              String   @id @default(cuid())
+  receiptNumber   String   @unique
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  supplierId      String?
+  notes           String?
+  createdByUserId String
+  createdBy       User     @relation("GrCreatedBy", fields: [createdByUserId], references: [id])
+  receivedAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  lines           GoodsReceiptLine[]
+  landedCosts     LandedCost[]
+  billLinks       SupplierBillReceipt[]
+
+  @@index([purchaseOrderId])
+  @@index([receivedAt])
+}
+
+model GoodsReceiptLine {
+  id             String       @id @default(cuid())
+  goodsReceiptId String
+  goodsReceipt   GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product      @relation(fields: [productId], references: [id])
+  purchaseOrderLineId String?
+  quantity       Decimal      @db.Decimal(18, 4)
+  /// Unit cost before landed-cost spread.
+  unitCost       Decimal      @db.Decimal(14, 4)
+  /// Unit cost after landed-cost spread (null until applied).
+  landedUnitCost Decimal?     @db.Decimal(14, 4)
+  locationId     String
+  location       Location     @relation(fields: [locationId], references: [id])
+  stockBatchId   String?
+  expiryDate     DateTime?
+  lotNumber      String?
+
+  @@index([goodsReceiptId])
+  @@index([productId])
+}
+
+model LandedCost {
+  id             String       @id @default(cuid())
+  goodsReceiptId String
+  goodsReceipt   GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  /// TRANSPORT | CUSTOMS | CLEARING | OTHER
+  kind           String
+  description    String?
+  amount         Decimal      @db.Decimal(12, 2)
+  /// VALUE | QUANTITY
+  allocateBy     String       @default("VALUE")
+  createdAt      DateTime     @default(now())
+
+  @@index([goodsReceiptId])
+}
+
+model SupplierBill {
+  id              String             @id @default(cuid())
+  billNumber      String             @unique
+  supplierId      String
+  supplier        Supplier           @relation(fields: [supplierId], references: [id])
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
+  supplierInvoiceRef String?
+  status          SupplierBillStatus @default(OPEN)
+  amountDue       Decimal            @db.Decimal(12, 2)
+  amountPaid      Decimal            @db.Decimal(12, 2) @default(0)
+  dueDate         DateTime?
+  notes           String?
+  createdByUserId String
+  createdBy       User               @relation("BillCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  receipts        SupplierBillReceipt[]
+  payments        SupplierPayment[]
+
+  @@index([supplierId, status])
+  @@index([dueDate])
+}
+
+model SupplierBillReceipt {
+  id             String       @id @default(cuid())
+  supplierBillId String
+  supplierBill   SupplierBill @relation(fields: [supplierBillId], references: [id], onDelete: Cascade)
+  goodsReceiptId String
+  goodsReceipt   GoodsReceipt @relation(fields: [goodsReceiptId], references: [id])
+
+  @@unique([supplierBillId, goodsReceiptId])
+}
+
+model SupplierPayment {
+  id              String        @id @default(cuid())
+  supplierBillId  String
+  supplierBill    SupplierBill  @relation(fields: [supplierBillId], references: [id], onDelete: Cascade)
+  amount          Decimal       @db.Decimal(12, 2)
+  method          PaymentMethod @default(CASH)
+  reference       String?
+  paidAt          DateTime      @default(now())
+  createdByUserId String
+  createdBy       User          @relation("PaymentCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime      @default(now())
+
+  @@index([supplierBillId])
+}
+
+model SupplierReturn {
+  id              String               @id @default(cuid())
+  returnNumber    String               @unique
+  supplierId      String
+  supplier        Supplier             @relation(fields: [supplierId], references: [id])
+  status          SupplierReturnStatus @default(DRAFT)
+  reason          String?
+  notes           String?
+  createdByUserId String
+  createdBy       User                 @relation("SupplierReturnCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  lines           SupplierReturnLine[]
+
+  @@index([supplierId, status])
+}
+
+model SupplierReturnLine {
+  id               String         @id @default(cuid())
+  supplierReturnId String
+  supplierReturn   SupplierReturn @relation(fields: [supplierReturnId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product        @relation(fields: [productId], references: [id])
+  quantity         Decimal        @db.Decimal(18, 4)
+  unitCost         Decimal        @db.Decimal(14, 4)
+  locationId       String
+  location         Location       @relation(fields: [locationId], references: [id])
+  stockBatchId     String?
+
+  @@index([supplierReturnId])
+  @@index([productId])
 }
