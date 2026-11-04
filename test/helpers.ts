@@ -43,7 +43,15 @@ export const seedBasics = async (prisma: PrismaClient) => {
       });
     }
   }
-  const location = await prisma.location.create({ data: { code: "DEFAULT_STORE", name: "Main Store" } });
+  const location = await prisma.location.create({
+    data: { code: "DEFAULT_STORE", name: "Shop floor", sellable: true, storeCode: "DEFAULT_STORE", sortOrder: 0 },
+  });
+  await prisma.location.create({
+    data: { code: "BACK_STORE", name: "Back store", sellable: false, storeCode: "DEFAULT_STORE", sortOrder: 10 },
+  });
+  await prisma.location.create({
+    data: { code: "QUARANTINE", name: "Quarantine", sellable: false, storeCode: "DEFAULT_STORE", sortOrder: 20 },
+  });
   const hash = await bcrypt.hash(PASSWORD, 4);
   const users: Record<string, { id: string; email: string }> = {};
   for (const name of BUILTIN_ROLES) {
@@ -120,9 +128,11 @@ export const addBatch = async (
   cost: number,
   before: Prisma.Decimal,
 ) => {
+  const inv = await prisma.inventoryItem.findUniqueOrThrow({ where: { id: inventoryItemId } });
   const batch = await prisma.stockBatch.create({
     data: {
       productId,
+      locationId: inv.locationId,
       qtyReceived: qty,
       qtyRemaining: qty,
       unitCost: cost,

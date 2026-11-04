@@ -45,11 +45,43 @@ const RULES: Rule[] = [
   { method: "get", path: "/inventory/movements", all: [K.STOCK_HISTORY_VIEW] },
   { method: "post", path: "/inventory/adjust", all: [K.STOCK_ADJUST] },
   { method: "post", path: "/inventory/return", all: [K.STOCK_ADJUST] },
+  { method: "post", path: "/inventory/write-off", all: [K.STOCK_WRITE_OFF] },
+  { method: "get", path: "/inventory/overview", all: [K.STOCK_VIEW] },
+  { method: "get", path: "/inventory/lookup?q=test", all: [K.STOCK_VIEW] },
+  { method: "post", path: "/inventory/quarantine", all: [K.STOCK_ADJUST] },
+  { method: "get", path: "/inventory/replenishment", all: [K.STOCK_VIEW] },
+  { method: "post", path: "/inventory/snapshot", all: [K.STOCK_VIEW] },
+  { method: "post", path: "/imports/products/preview", all: [K.PRODUCTS_CREATE] },
+  { method: "post", path: "/imports/products/commit", all: [K.PRODUCTS_CREATE] },
   { method: "post", path: "/stock/receive", all: [K.STOCK_RECEIVE] },
   { method: "get", path: "/stock/history", all: [K.STOCK_HISTORY_VIEW] },
   { method: "get", path: "/stock/history/some-id", all: [K.STOCK_HISTORY_VIEW] },
   { method: "get", path: "/stock/history/export", all: [K.STOCK_HISTORY_VIEW] },
   { method: "get", path: "/stock/batches?productId=x", all: [K.STOCK_HISTORY_VIEW] },
+  { method: "post", path: "/stock/receive-batch", all: [K.STOCK_RECEIVE] },
+  // Transfers
+  { method: "get", path: "/transfers", all: [K.STOCK_TRANSFER] },
+  { method: "get", path: "/transfers/some-id", all: [K.STOCK_TRANSFER] },
+  { method: "post", path: "/transfers", all: [K.STOCK_TRANSFER] },
+  { method: "post", path: "/transfers/some-id/send", all: [K.STOCK_TRANSFER] },
+  { method: "post", path: "/transfers/some-id/receive", all: [K.STOCK_TRANSFER] },
+  { method: "post", path: "/transfers/some-id/cancel", all: [K.STOCK_TRANSFER] },
+  // Stock counts
+  { method: "get", path: "/stock-counts", all: [K.STOCK_COUNT] },
+  { method: "get", path: "/stock-counts/some-id", all: [K.STOCK_COUNT] },
+  { method: "post", path: "/stock-counts", all: [K.STOCK_COUNT] },
+  { method: "post", path: "/stock-counts/some-id/start", all: [K.STOCK_COUNT] },
+  { method: "post", path: "/stock-counts/some-id/lines", all: [K.STOCK_COUNT] },
+  { method: "post", path: "/stock-counts/some-id/post", all: [K.STOCK_COUNT_APPROVE] },
+  // Prices
+  { method: "post", path: "/prices/change", all: [K.PRICES_MANAGE] },
+  { method: "get", path: "/prices/history?productId=x", all: [K.PRICES_MANAGE] },
+  // Labels
+  { method: "get", path: "/labels/pending", all: [K.LABELS_PRINT] },
+  { method: "post", path: "/labels/printed", all: [K.LABELS_PRINT] },
+  // Locations
+  { method: "post", path: "/locations", all: [K.LOCATIONS_MANAGE] },
+  { method: "patch", path: "/locations/some-id", all: [K.LOCATIONS_MANAGE] },
   { method: "get", path: "/sales", any: [K.SALES_VIEW, K.SALES_VIEW_OWN, K.SALES_VIEW_ALL] },
   { method: "get", path: "/sales/some-id", any: [K.SALES_VIEW, K.SALES_VIEW_OWN, K.SALES_VIEW_ALL] },
   { method: "get", path: "/sales/export", all: [K.SALES_EXPORT] },
@@ -93,6 +125,8 @@ const ANY_SIGNED_IN: Pick<Rule, "method" | "path">[] = [
   { method: "put", path: "/auth/pin" },
   { method: "get", path: "/approvals/managers?action=SALE_VOID" },
   { method: "post", path: "/approvals" },
+  { method: "get", path: "/locations" },
+  { method: "get", path: "/locations/some-id" },
 ];
 
 describe("one permission model", () => {

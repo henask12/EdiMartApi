@@ -42,19 +42,19 @@ const spec: Record<PermissionKey, Spec> = {
   [P.PRODUCTS_SELL]: { group: "Products", description: "Old key. Selling now needs “Record sales”.", deprecated: true },
   [P.PRODUCTS_RESTOCK]: { group: "Products", description: "Old key. Adding stock now needs “Receive stock”.", deprecated: true },
   [P.PRODUCTS_RESERVE]: { group: "Products", description: "Reserve stock for a customer from a product." },
-  [P.PRICES_MANAGE]: { group: "Products", description: "Change prices in bulk and see price history.", sensitive: true, status: "planned", plannedPhase: 3 },
-  [P.LABELS_PRINT]: { group: "Products", description: "Print shelf and product labels.", status: "planned", plannedPhase: 3 },
+  [P.PRICES_MANAGE]: { group: "Products", description: "Change prices in bulk and see price history.", sensitive: true },
+  [P.LABELS_PRINT]: { group: "Products", description: "Print shelf and product labels." },
 
   // Stock
   [P.STOCK_VIEW]: { group: "Stock", description: "See stock levels, batches and the expiry list." },
   [P.STOCK_RECEIVE]: { group: "Stock", description: "Receive deliveries into stock." },
   [P.STOCK_HISTORY_VIEW]: { group: "Stock", description: "See the stock movement history." },
   [P.STOCK_ADJUST]: { group: "Stock", description: "Correct stock quantities by hand (counts, damage, loss).", sensitive: true },
-  [P.STOCK_COUNT]: { group: "Stock", description: "Take part in stock counts.", status: "planned", plannedPhase: 3 },
+  [P.STOCK_COUNT]: { group: "Stock", description: "Take part in stock counts." },
   [P.STOCK_COUNT_APPROVE]: { group: "Stock", description: "Approve large stock corrections and stock counts (also lets a manager approve with their PIN).", sensitive: true },
-  [P.STOCK_TRANSFER]: { group: "Stock", description: "Move stock between locations.", status: "planned", plannedPhase: 3 },
-  [P.STOCK_WRITE_OFF]: { group: "Stock", description: "Write off expired or damaged stock.", sensitive: true, status: "planned", plannedPhase: 3 },
-  [P.LOCATIONS_MANAGE]: { group: "Stock", description: "Set up shelves, back store and other stock locations.", status: "planned", plannedPhase: 3 },
+  [P.STOCK_TRANSFER]: { group: "Stock", description: "Move stock between locations." },
+  [P.STOCK_WRITE_OFF]: { group: "Stock", description: "Write off expired or damaged stock.", sensitive: true },
+  [P.LOCATIONS_MANAGE]: { group: "Stock", description: "Set up shelves, back store and other stock locations." },
   [P.RESERVATIONS_MANAGE]: { group: "Stock", description: "See, change, cancel and complete reservations." },
 
   // Sales

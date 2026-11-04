@@ -13,6 +13,14 @@ export class CreateProductDto {
   @MinLength(1)
   name!: string;
 
+  @IsOptional()
+  @IsString()
+  nameAm?: string;
+
+  @IsOptional()
+  @IsString()
+  brand?: string;
+
   @IsString()
   categoryId!: string;
 
@@ -38,6 +46,32 @@ export class CreateProductDto {
   @IsNumber()
   @Min(0)
   restockQty?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  minStock?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  maxStock?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  leadTimeDays?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  trackBatches?: boolean;
+
+  @IsOptional()
+  @IsString()
+  barcode?: string;
 
   @IsOptional()
   @IsString()
@@ -72,6 +106,14 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsString()
+  nameAm?: string | null;
+
+  @IsOptional()
+  @IsString()
+  brand?: string | null;
+
+  @IsOptional()
+  @IsString()
   categoryId?: string;
 
   @IsOptional()
@@ -97,6 +139,32 @@ export class UpdateProductDto {
   @IsNumber()
   @Min(0)
   restockQty?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  minStock?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  maxStock?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  leadTimeDays?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  trackBatches?: boolean;
+
+  @IsOptional()
+  @IsString()
+  barcode?: string;
 
   @IsOptional()
   @IsBoolean()

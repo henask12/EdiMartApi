@@ -80,6 +80,57 @@ enum MovementType {
   RESERVE
   RELEASE_RESERVE
   DAMAGE
+  WRITE_OFF
+  COUNT
+}
+
+enum TaxCategory {
+  STANDARD
+  ZERO_RATED
+  EXEMPT
+}
+
+enum AdjustReason {
+  DAMAGED
+  EXPIRED
+  THEFT_LOSS
+  INTERNAL_USE
+  GIFT_SAMPLE
+  DATA_CORRECTION
+  OTHER
+}
+
+enum TransferStatus {
+  DRAFT
+  SENT
+  RECEIVED
+  CANCELLED
+}
+
+enum StockCountType {
+  FULL
+  CYCLE
+}
+
+enum StockCountStatus {
+  DRAFT
+  IN_PROGRESS
+  REVIEW
+  POSTED
+  CANCELLED
+}
+
+enum LabelJobStatus {
+  PENDING
+  PRINTED
+  CANCELLED
+}
+
+enum BarcodeKind {
+  EAN13
+  CODE128
+  INTERNAL
+  OTHER
 }
 
 enum NotificationType {
@@ -124,8 +175,13 @@ model User {
   auditLogs       AuditLog[]
   stockMovements  StockMovement[]
   sales           Sale[]           @relation("SaleCreatedBy")
-  stockBatches    StockBatch[]
-  reservations    Reservation[]
+  stockBatches       StockBatch[]
+  reservations       Reservation[]
+  stockTransfers     StockTransfer[]      @relation("TransferCreatedBy")
+  stockTransferRecv  StockTransfer[]      @relation("TransferReceivedBy")
+  stockCounts        StockCount[]         @relation("CountCreatedBy")
+  stockCountsPosted  StockCount[]         @relation("CountPostedBy")
+  priceChanges       PriceChange[]
 }
 
 model AuditLog {
@@ -160,6 +216,9 @@ model Product {
   id            String            @id @default(cuid())
   sku           String?           @unique
   name          String
+  /// Amharic display name (optional).
+  nameAm        String?
+  brand         String?
   categoryId    String
   category      Category          @relation(fields: [categoryId], references: [id])
   productTypeId String?
@@ -169,10 +228,22 @@ model Product {
   originCountry   String?
   sellingPrice    Decimal           @db.Decimal(12, 2)
   costPrice     Decimal           @db.Decimal(12, 2) @default(0)
+  /// Reorder point (alert when available falls to or below this).
   restockAt     Int               @default(0)
+  /// Suggested reorder quantity.
   restockQty    Int               @default(0)
+  minStock      Int               @default(0)
+  maxStock      Int               @default(0)
+  leadTimeDays  Int               @default(0)
+  taxCategory   TaxCategory       @default(STANDARD)
+  /// When true, receiving should capture lot/expiry; sales use FEFO and record batch links.
+  trackBatches  Boolean           @default(false)
+  defaultLocationId String?
+  defaultLocation   Location?     @relation("ProductDefaultLocation", fields: [defaultLocationId], references: [id])
   expiryDate    DateTime?
   isActive      Boolean           @default(true)
+  /// Soft-archive: products with history are never deleted.
+  archivedAt    DateTime?
   lastOutOfStockAlertAt DateTime?
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
@@ -180,17 +251,51 @@ model Product {
   saleLines     SaleLine[]
   stockBatches  StockBatch[]
   reservations  Reservation[]
+  barcodes      ProductBarcode[]
+  priceChanges  PriceChange[]
+  labelJobs     LabelReprintQueue[]
+  transferLines StockTransferLine[]
+  countLines    StockCountLine[]
+  snapshots     InventorySnapshot[]
 
   @@unique([categoryId, name])
   @@index([expiryDate])
+  @@index([brand])
+  @@index([archivedAt])
+}
+
+model ProductBarcode {
+  id        String      @id @default(cuid())
+  productId String
+  product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  barcode   String      @unique
+  kind      BarcodeKind @default(INTERNAL)
+  isPrimary Boolean     @default(false)
+  createdAt DateTime    @default(now())
+
+  @@index([productId])
 }
 
 model Location {
   id             String          @id @default(cuid())
   code           String          @unique
   name           String
+  /// Groups locations into a physical shop; second store later = new storeCode.
+  storeCode      String          @default("DEFAULT_STORE")
+  sellable       Boolean         @default(true)
+  sortOrder      Int             @default(0)
+  binCode        String?
+  isActive       Boolean         @default(true)
   inventoryItems InventoryItem[]
+  stockBatches   StockBatch[]
+  transfersFrom  StockTransfer[] @relation("TransferFrom")
+  transfersTo    StockTransfer[] @relation("TransferTo")
+  stockCounts    StockCount[]
+  defaultForProducts Product[]   @relation("ProductDefaultLocation")
+  snapshots      InventorySnapshot[]
   createdAt      DateTime        @default(now())
+
+  @@index([storeCode, sellable])
 }
 
 model InventoryItem {
@@ -212,6 +317,10 @@ model StockBatch {
   id                String          @id @default(cuid())
   productId         String
   product           Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Location this batch currently sits in (set on receive / transfer).
+  locationId        String?
+  location          Location?       @relation(fields: [locationId], references: [id])
+  lotNumber         String?
   qtyReceived       Decimal         @db.Decimal(18, 4)
   qtyRemaining      Decimal         @db.Decimal(18, 4)
   unitCost          Decimal         @db.Decimal(14, 4) @default(0)
@@ -220,32 +329,37 @@ model StockBatch {
   receivedByUserId  String?
   receivedBy        User?           @relation(fields: [receivedByUserId], references: [id])
   stockMovements    StockMovement[]
+  saleLineBatches   SaleLineBatch[]
 
   @@index([productId, receivedAt])
   @@index([expiryDate])
+  @@index([locationId, productId])
+  @@index([lotNumber])
 }
 
 model StockMovement {
-  id              String        @id @default(cuid())
+  id              String         @id @default(cuid())
   inventoryItemId String
-  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+  inventoryItem   InventoryItem  @relation(fields: [inventoryItemId], references: [id])
   stockBatchId    String?
-  stockBatch      StockBatch?   @relation(fields: [stockBatchId], references: [id])
+  stockBatch      StockBatch?    @relation(fields: [stockBatchId], references: [id])
   type            MovementType
-  qtyDelta        Decimal       @db.Decimal(18, 4)
-  unitCost        Decimal?      @db.Decimal(14, 4)
-  beforeOnHand    Decimal?      @db.Decimal(18, 4)
-  afterOnHand     Decimal?      @db.Decimal(18, 4)
+  qtyDelta        Decimal        @db.Decimal(18, 4)
+  unitCost        Decimal?       @db.Decimal(14, 4)
+  beforeOnHand    Decimal?       @db.Decimal(18, 4)
+  afterOnHand     Decimal?       @db.Decimal(18, 4)
+  reasonCode      AdjustReason?
   refType         String?
   refId           String?
   notes           String?
   metadata        Json?
   createdByUserId String?
-  createdBy       User?         @relation(fields: [createdByUserId], references: [id])
-  createdAt       DateTime      @default(now())
+  createdBy       User?          @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime       @default(now())
 
   @@index([inventoryItemId, createdAt])
   @@index([refType, refId])
+  @@index([reasonCode])
 }
 
 model Reservation {
@@ -306,6 +420,20 @@ model SaleLine {
   lineDiscount   Decimal  @db.Decimal(12, 2) @default(0)
   taxAmount    Decimal  @db.Decimal(12, 2) @default(0)
   lineTotal    Decimal  @db.Decimal(12, 2)
+  batchAllocations SaleLineBatch[]
+}
+
+/// FEFO batch allocations for a sale line (traceability).
+model SaleLineBatch {
+  id           String     @id @default(cuid())
+  saleLineId   String
+  saleLine     SaleLine   @relation(fields: [saleLineId], references: [id], onDelete: Cascade)
+  stockBatchId String?
+  stockBatch   StockBatch? @relation(fields: [stockBatchId], references: [id])
+  quantity     Decimal    @db.Decimal(18, 4)
+
+  @@index([saleLineId])
+  @@index([stockBatchId])
 }
 
 enum PaymentMethod {
@@ -388,4 +516,129 @@ model StoreSetting {
   value           Json
   updatedAt       DateTime @updatedAt
   updatedByUserId String?
+}
+
+model StockTransfer {
+  id              String         @id @default(cuid())
+  transferNumber  String         @unique
+  status          TransferStatus @default(DRAFT)
+  fromLocationId  String
+  fromLocation    Location       @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocationId    String
+  toLocation      Location       @relation("TransferTo", fields: [toLocationId], references: [id])
+  notes           String?
+  createdByUserId String
+  createdBy       User           @relation("TransferCreatedBy", fields: [createdByUserId], references: [id])
+  receivedByUserId String?
+  receivedBy      User?          @relation("TransferReceivedBy", fields: [receivedByUserId], references: [id])
+  sentAt          DateTime?
+  receivedAt      DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  lines           StockTransferLine[]
+
+  @@index([status, createdAt])
+  @@index([fromLocationId])
+  @@index([toLocationId])
+}
+
+model StockTransferLine {
+  id         String        @id @default(cuid())
+  transferId String
+  transfer   StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product       @relation(fields: [productId], references: [id])
+  quantity   Decimal       @db.Decimal(18, 4)
+  /// Optional preferred batch to move; otherwise FEFO at send time.
+  stockBatchId String?
+
+  @@index([transferId])
+  @@index([productId])
+}
+
+model StockCount {
+  id              String           @id @default(cuid())
+  countNumber     String           @unique
+  type            StockCountType   @default(FULL)
+  status          StockCountStatus @default(DRAFT)
+  locationId      String?
+  location        Location?        @relation(fields: [locationId], references: [id])
+  notes           String?
+  startedAt       DateTime?
+  postedAt        DateTime?
+  createdByUserId String
+  createdBy       User             @relation("CountCreatedBy", fields: [createdByUserId], references: [id])
+  postedByUserId  String?
+  postedBy        User?            @relation("CountPostedBy", fields: [postedByUserId], references: [id])
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  lines           StockCountLine[]
+
+  @@index([status, createdAt])
+  @@index([locationId])
+}
+
+model StockCountLine {
+  id                 String     @id @default(cuid())
+  countId            String
+  count              StockCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  productId          String
+  product            Product    @relation(fields: [productId], references: [id])
+  /// System on-hand at count start (so sales during count can be reconciled).
+  systemQtySnapshot  Decimal    @db.Decimal(18, 4)
+  countedQty         Decimal?   @db.Decimal(18, 4)
+  /// Set when posting: counted − (snapshot + movements since start).
+  varianceQty        Decimal?   @db.Decimal(18, 4)
+  needsRecount       Boolean    @default(false)
+  notes              String?
+
+  @@unique([countId, productId])
+  @@index([productId])
+}
+
+model PriceChange {
+  id              String   @id @default(cuid())
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  oldPrice        Decimal  @db.Decimal(12, 2)
+  newPrice        Decimal  @db.Decimal(12, 2)
+  effectiveAt     DateTime @default(now())
+  createdByUserId String?
+  createdBy       User?    @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+  note            String?
+
+  @@index([productId, effectiveAt])
+  @@index([effectiveAt])
+}
+
+model LabelReprintQueue {
+  id        String         @id @default(cuid())
+  productId String
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  reason    String
+  status    LabelJobStatus @default(PENDING)
+  createdAt DateTime       @default(now())
+  printedAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([productId])
+}
+
+/// Daily quantity/value snapshot per product×location for fast history charts.
+model InventorySnapshot {
+  id            String   @id @default(cuid())
+  /// Business-time calendar date YYYY-MM-DD (Africa/Addis_Ababa).
+  date          String
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  locationId    String
+  location      Location @relation(fields: [locationId], references: [id])
+  quantity      Decimal  @db.Decimal(18, 4)
+  valueAtCost   Decimal  @db.Decimal(14, 2)
+  valueAtRetail Decimal  @db.Decimal(14, 2)
+  createdAt     DateTime @default(now())
+
+  @@unique([date, productId, locationId])
+  @@index([date])
 }

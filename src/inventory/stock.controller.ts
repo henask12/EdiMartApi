@@ -2,29 +2,28 @@ import { Body, Controller, Get, Param, Post, Query, Req, Res } from "@nestjs/com
 import { MovementType, PermissionKey } from "@prisma/client";
 import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import type { Response } from "express";
-import { IsOptional, IsString } from "class-validator";
+import { IsArray, IsOptional, IsString, ValidateNested } from "class-validator";
+import { Type } from "class-transformer";
 import { parseExportFormat, sendExport } from "../export/export-response.util";
 import { InventoryService } from "./inventory.service";
 import { viewerFor } from "../permissions/access";
 import type { Actor } from "../permissions/permissions.service";
 
 class ReceiveStockDto {
-  @IsString()
-  productId!: string;
+  @IsString() productId!: string;
+  @IsString() quantity!: string;
+  @IsString() unitCost!: string;
+  @IsOptional() @IsString() expiryDate?: string;
+  @IsOptional() @IsString() locationId?: string;
+  @IsOptional() @IsString() lotNumber?: string;
+  @IsOptional() @IsString() notes?: string;
+}
 
-  @IsString()
-  quantity!: string;
-
-  @IsString()
-  unitCost!: string;
-
-  @IsOptional()
-  @IsString()
-  expiryDate?: string;
-
-  @IsOptional()
-  @IsString()
-  notes?: string;
+class ReceiveBatchDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ReceiveStockDto)
+  lines!: ReceiveStockDto[];
 }
 
 type Authed = { user: Actor };
@@ -37,6 +36,12 @@ export class StockController {
   @Post("receive")
   receive(@Req() req: Authed, @Body() body: ReceiveStockDto) {
     return this.inventory.receiveGoods(req.user.userId, body);
+  }
+
+  @RequirePermissions(PermissionKey.STOCK_RECEIVE)
+  @Post("receive-batch")
+  receiveBatch(@Req() req: Authed, @Body() body: ReceiveBatchDto) {
+    return this.inventory.receiveBatch(req.user.userId, body.lines);
   }
 
   @RequirePermissions(PermissionKey.STOCK_HISTORY_VIEW)

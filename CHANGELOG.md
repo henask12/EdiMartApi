@@ -1,5 +1,67 @@
 # Changelog
 
+## Phase 3 — Inventory core
+
+### Follow-ups (same phase)
+- Transfer cancel; quarantine move; replenishment suggestions; nightly snapshot+reconcile cron
+  (00:05 Africa/Addis_Ababa); bulk CSV import preview/commit (`/imports/products/*`).
+- Product create/update: Amharic name, brand, barcode, trackBatches, min/max.
+- Client: expiry quarantine/write-off, stock-count detail (blind entry), inventory replenishment
+  list, `/products/import`.
+
+### Added (new endpoints)
+- **Locations** CRUD: `GET /locations` (any authenticated), `GET /locations/:id`,
+  `POST /locations` (`LOCATIONS_MANAGE`), `PATCH /locations/:id` (`LOCATIONS_MANAGE`).
+  Default shop = "Shop floor" (`DEFAULT_STORE`), plus sellable `BACK_STORE` and non-sellable
+  `QUARANTINE` (same storeCode so a second store can be added later).
+- **Transfers**: `GET /transfers`, `GET /transfers/:id`, `POST /transfers` (draft),
+  `POST /transfers/:id/send`, `POST /transfers/:id/receive`, `POST /transfers/:id/cancel` —
+  all `STOCK_TRANSFER`. Draft → sent (deducts source, writes TRANSFER movements) → received
+  (adds destination). Numbered `TRF-YYYYMMDD-NNNN` via `DocumentCounter`.
+- **Stock counts**: `GET /stock-counts`, `GET /stock-counts/:id`, `POST /stock-counts` (draft),
+  `POST /stock-counts/:id/start` (snapshots system qty), `POST /stock-counts/:id/lines` (record
+  counted qty), `POST /stock-counts/:id/post` (`STOCK_COUNT_APPROVE`) — writes COUNT movements.
+  Numbered `CNT-YYYYMMDD-NNNN`.
+- **Price changes**: `POST /prices/change` (`PRICES_MANAGE`), `GET /prices/history?productId=…`.
+  Creates `PriceChange` + `LabelReprintQueue` entry.
+- **Labels**: `GET /labels/pending` (`LABELS_PRINT`), `POST /labels/printed` (mark printed).
+- **Write-off**: `POST /inventory/write-off` (`STOCK_WRITE_OFF`) — writes WRITE_OFF movement.
+- **Inventory overview**: `GET /inventory/overview` (`STOCK_VIEW`) — SKU count, low/out counts,
+  stock value at cost/retail, expiring batch count/value.
+- **Stock lookup**: `GET /inventory/lookup?q=…` (`STOCK_VIEW`) — search by barcode/SKU/name,
+  returns per-location stock, batches, available qty.
+- **Multi-line receive**: `POST /stock/receive-batch` (`STOCK_RECEIVE`) — receive multiple
+  lines in one call (scan-to-receive workflow).
+
+### Changed (contract)
+- `POST /stock/receive` and `POST /inventory/adjust` now accept optional `locationId`,
+  `lotNumber` (receive only), and `reasonCode`.
+- `allocateFromBatches` accepts optional `locationId` filter and `allowExpired` flag; by default
+  expired batches are skipped.
+- `productMultiLocationAvailable` utility: sums sellable locations' on-hand minus reserved.
+- Sales checkout now writes `SaleLineBatch` rows for every FEFO allocation (batch traceability).
+- When `product.trackBatches` is true, checkout skips expired batches during allocation (unless
+  the caller sends `allowExpiredSale: true` in the body — reserved for future manager override).
+- Phase 3 permissions (`PRICES_MANAGE`, `LABELS_PRINT`, `STOCK_COUNT`, `STOCK_TRANSFER`,
+  `STOCK_WRITE_OFF`, `LOCATIONS_MANAGE`) changed from "planned" to "active".
+
+### Database (additive only)
+- Migration `20261104120000_phase3_inventory_core`:
+  - New enums: `AdjustReason`, `TransferStatus`, `StockCountType`, `StockCountStatus`,
+    `LabelJobStatus`, `BarcodeKind`; new `MovementType` values `WRITE_OFF`, `COUNT`.
+  - `Location` columns: `sellable`, `storeCode`, `sortOrder`, `binCode`, `isActive`, `createdAt`.
+    Renames DEFAULT_STORE display name to "Shop floor"; inserts BACK_STORE + QUARANTINE.
+  - `Product` columns: `nameAm`, `restockQty`, `minStock`, `maxStock`, `leadTimeDays`,
+    `trackBatches`, `defaultLocationId`, `archivedAt`, `taxCategory`.
+  - New tables: `ProductBarcode`, `SaleLineBatch`, `StockTransfer`, `StockTransferLine`,
+    `StockCount`, `StockCountLine`, `PriceChange`, `LabelReprintQueue`, `InventorySnapshot`.
+  - `StockBatch` columns: `locationId` (backfilled from DEFAULT_STORE), `lotNumber`.
+  - `StockMovement` column: `reasonCode`.
+
+### Seed
+- Creates BACK_STORE (non-sellable) and QUARANTINE (non-sellable) alongside DEFAULT_STORE.
+- Sets `sellable`, `storeCode`, `sortOrder` on all three locations.
+
 ## Phase 2 - design system (API changes only)
 
 ### Added (additive)

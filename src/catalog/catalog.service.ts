@@ -37,6 +37,7 @@ const productInclude = {
   category: true,
   productType: true,
   inventoryItems: { include: { location: true } },
+  barcodes: true,
 } as const;
 
 type ProductWithRelations = Prisma.ProductGetPayload<{ include: typeof productInclude }>;
@@ -241,12 +242,19 @@ export class CatalogService {
     userId: string,
     data: {
       name: string;
+      nameAm?: string;
+      brand?: string;
       categoryId: string;
       productTypeId?: string;
       sellingPrice: string;
       costPrice?: string;
       restockAt?: number;
       restockQty?: number;
+      minStock?: number;
+      maxStock?: number;
+      leadTimeDays?: number;
+      trackBatches?: boolean;
+      barcode?: string;
       imagePath?: string;
       description?: string;
       originCountry?: string;
@@ -284,6 +292,8 @@ export class CatalogService {
       const createData: Prisma.ProductUncheckedCreateInput = {
         sku: autoSku(name),
         name,
+        nameAm: data.nameAm?.trim() || null,
+        brand: data.brand?.trim() || null,
         categoryId: data.categoryId,
         productTypeId: data.productTypeId ?? null,
         imagePath: data.imagePath,
@@ -293,6 +303,10 @@ export class CatalogService {
         costPrice: cost,
         restockAt: data.restockAt ?? 0,
         restockQty: data.restockQty ?? 0,
+        minStock: data.minStock ?? 0,
+        maxStock: data.maxStock ?? 0,
+        leadTimeDays: data.leadTimeDays ?? 0,
+        trackBatches: data.trackBatches ?? Boolean(data.expiryDate),
         expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
       };
       const created = await tx.product.create({ data: createData });
@@ -304,6 +318,17 @@ export class CatalogService {
           averageCost: cost,
         },
       });
+      const barcode = data.barcode?.trim();
+      if (barcode) {
+        await tx.productBarcode.create({
+          data: {
+            productId: created.id,
+            barcode,
+            kind: "INTERNAL",
+            isPrimary: true,
+          },
+        });
+      }
       return created;
     });
     await this.audit.log(userId, "CREATE", "Product", product.id, { name });
@@ -327,12 +352,19 @@ export class CatalogService {
     id: string,
     data: Partial<{
       name: string;
+      nameAm: string | null;
+      brand: string | null;
       categoryId: string;
       productTypeId: string | null;
       sellingPrice: string;
       costPrice: string;
       restockAt: number;
       restockQty: number;
+      minStock: number;
+      maxStock: number;
+      leadTimeDays: number;
+      trackBatches: boolean;
+      barcode: string;
       isActive: boolean;
       imagePath: string;
       description: string | null;
@@ -370,6 +402,8 @@ export class CatalogService {
     }
     const updateData: Prisma.ProductUncheckedUpdateInput = {
       name: data.name?.trim(),
+      nameAm: optionalTrimmedString(data.nameAm),
+      brand: optionalTrimmedString(data.brand),
       categoryId: data.categoryId,
       productTypeId:
         data.productTypeId !== undefined ? data.productTypeId : undefined,
@@ -381,6 +415,10 @@ export class CatalogService {
       costPrice: data.costPrice !== undefined ? toDecimal(data.costPrice) : undefined,
       restockAt: data.restockAt,
       restockQty: data.restockQty,
+      minStock: data.minStock,
+      maxStock: data.maxStock,
+      leadTimeDays: data.leadTimeDays,
+      trackBatches: data.trackBatches,
       isActive: data.isActive,
       expiryDate:
         data.expiryDate !== undefined
@@ -389,9 +427,24 @@ export class CatalogService {
             : null
           : undefined,
     };
-    await this.prisma.product.update({
-      where: { id },
-      data: updateData,
+    await this.prisma.$transaction(async (tx) => {
+      await tx.product.update({ where: { id }, data: updateData });
+      const barcode = data.barcode?.trim();
+      if (barcode) {
+        const existingPrimary = await tx.productBarcode.findFirst({
+          where: { productId: id, isPrimary: true },
+        });
+        if (existingPrimary) {
+          await tx.productBarcode.update({
+            where: { id: existingPrimary.id },
+            data: { barcode },
+          });
+        } else {
+          await tx.productBarcode.create({
+            data: { productId: id, barcode, kind: "INTERNAL", isPrimary: true },
+          });
+        }
+      }
     });
     await this.audit.log(userId, "UPDATE", "Product", id, { name: data.name });
     return this.getProduct(id, includeCost);

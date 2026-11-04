@@ -526,6 +526,13 @@ export class SalesService {
       },
     });
 
+    // Map sale line id by productId+index for SaleLineBatch creation
+    const saleLines = await tx.saleLine.findMany({ where: { saleId: sale.id } });
+    const saleLineByProduct = new Map<string, string>();
+    for (const sl of saleLines) {
+      saleLineByProduct.set(sl.productId, sl.id);
+    }
+
     for (const plan of movementPlans) {
       // Re-read under the lock so before/after reflect earlier lines of this same sale.
       const inv = await tx.inventoryItem.findUniqueOrThrow({ where: { id: plan.inventoryItemId } });
@@ -537,8 +544,19 @@ export class SalesService {
         throw new ConflictException("Not enough stock on hand");
       }
 
+      // Check for expired batches when product tracks batches
+      const product = productById.get(plan.productId);
+      const allowExpired = !!(input as Record<string, unknown>).allowExpiredSale;
+      const skipExpired = product?.trackBatches && !allowExpired;
+
       let running = inv.quantityOnHand;
-      for (const allocation of await allocateFromBatches(tx, plan.productId, plan.quantity)) {
+      const allocations = await allocateFromBatches(
+        tx,
+        plan.productId,
+        plan.quantity,
+        { locationId, allowExpired: !skipExpired },
+      );
+      for (const allocation of allocations) {
         const after = running.sub(allocation.quantity);
         await tx.stockMovement.create({
           data: {
@@ -555,6 +573,18 @@ export class SalesService {
           },
         });
         running = after;
+
+        // Write SaleLineBatch for FEFO traceability
+        const saleLineId = saleLineByProduct.get(plan.productId);
+        if (saleLineId) {
+          await tx.saleLineBatch.create({
+            data: {
+              saleLineId,
+              stockBatchId: allocation.batchId,
+              quantity: allocation.quantity,
+            },
+          });
+        }
       }
 
       if (plan.reservationId) {

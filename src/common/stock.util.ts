@@ -40,6 +40,30 @@ export const productStockSnapshot = async (
 };
 
 /**
+ * Multi-location available = sum of on-hand across sellable locations minus reserved.
+ * Used for the "available to sell" figure across the whole store.
+ */
+export const productMultiLocationAvailable = async (
+  prisma: Db,
+  productId: string,
+  sellableLocationIds: string[],
+  options?: { excludeReservationId?: string },
+): Promise<{ totalOnHand: Prisma.Decimal; reserved: Prisma.Decimal; available: Prisma.Decimal }> => {
+  if (sellableLocationIds.length === 0) {
+    const reserved = await getReservedQty(prisma, productId, options);
+    return { totalOnHand: new Prisma.Decimal(0), reserved, available: new Prisma.Decimal(0).sub(reserved) };
+  }
+  const agg = await prisma.inventoryItem.aggregate({
+    where: { productId, locationId: { in: sellableLocationIds } },
+    _sum: { quantityOnHand: true },
+  });
+  const totalOnHand = agg._sum.quantityOnHand ?? new Prisma.Decimal(0);
+  const reserved = await getReservedQty(prisma, productId, options);
+  const available = totalOnHand.sub(reserved);
+  return { totalOnHand, reserved, available };
+};
+
+/**
  * Lock the inventory rows (one per product) for the rest of the transaction, in a stable
  * order so two carts containing the same products can never deadlock each other.
  */
@@ -63,14 +87,36 @@ export type BatchAllocation = { batchId: string | null; quantity: Prisma.Decimal
  * First-expired-first-out allocation of `quantity` units to stock batches, decrementing
  * `qtyRemaining`. Units that no batch covers (stock that predates batch tracking, e.g. seeded
  * or migrated opening stock) come back as a single allocation with `batchId: null`.
+ *
+ * Options:
+ * - `locationId`: only pull from batches at this location.
+ * - `allowExpired`: default true (adjustments/write-offs). Pass false on tracked sales to block expired FEFO.
  */
 export const allocateFromBatches = async (
   tx: Prisma.TransactionClient,
   productId: string,
   quantity: Prisma.Decimal,
+  options?: { locationId?: string; allowExpired?: boolean },
 ): Promise<BatchAllocation[]> => {
+  const where: Prisma.StockBatchWhereInput = { productId, qtyRemaining: { gt: 0 } };
+  // Legacy batches may have null locationId — treat them as available at any location.
+  if (options?.locationId) {
+    where.AND = [
+      {
+        OR: [{ locationId: options.locationId }, { locationId: null }],
+      },
+    ];
+  }
+  if (options?.allowExpired === false) {
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        OR: [{ expiryDate: null }, { expiryDate: { gte: new Date() } }],
+      },
+    ];
+  }
   const batches = await tx.stockBatch.findMany({
-    where: { productId, qtyRemaining: { gt: 0 } },
+    where,
     orderBy: [{ expiryDate: { sort: "asc", nulls: "last" } }, { receivedAt: "asc" }],
   });
   const allocations: BatchAllocation[] = [];

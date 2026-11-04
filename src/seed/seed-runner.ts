@@ -87,8 +87,20 @@ export const runSeed = async (prisma: PrismaClient, options: SeedOptions = {}) =
 
   const defaultLoc = await prisma.location.upsert({
     where: { code: "DEFAULT_STORE" },
-    update: {},
-    create: { code: "DEFAULT_STORE", name: "Main Store" },
+    update: { name: "Shop floor", sellable: true, storeCode: "DEFAULT_STORE", sortOrder: 0 },
+    create: { code: "DEFAULT_STORE", name: "Shop floor", sellable: true, storeCode: "DEFAULT_STORE", sortOrder: 0 },
+  });
+
+  await prisma.location.upsert({
+    where: { code: "BACK_STORE" },
+    update: { sellable: true, storeCode: "DEFAULT_STORE", sortOrder: 10 },
+    create: { code: "BACK_STORE", name: "Back store", sellable: true, storeCode: "DEFAULT_STORE", sortOrder: 10 },
+  });
+
+  await prisma.location.upsert({
+    where: { code: "QUARANTINE" },
+    update: { sellable: false, storeCode: "DEFAULT_STORE", sortOrder: 20 },
+    create: { code: "QUARANTINE", name: "Quarantine", sellable: false, storeCode: "DEFAULT_STORE", sortOrder: 20 },
   });
 
   await prisma.user.create({
