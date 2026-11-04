@@ -41,6 +41,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       permissions,
       mustChangePassword: user.mustChangePassword,
       hasPin: Boolean(user.pinHash),
+      locale: user.locale,
     };
   }
 }

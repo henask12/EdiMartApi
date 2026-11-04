@@ -25,6 +25,10 @@ class UpdateProfileDto {
   @IsOptional()
   @IsEmail()
   email?: string;
+
+  @IsOptional()
+  @IsString()
+  locale?: string;
 }
 
 class ChangePasswordDto {
@@ -81,6 +85,7 @@ export class AuthController {
         permissions: string[];
         mustChangePassword: boolean;
         hasPin: boolean;
+        locale: string | null;
       };
     },
   ) {
@@ -92,6 +97,7 @@ export class AuthController {
       permissions: req.user.permissions,
       mustChangePassword: req.user.mustChangePassword,
       hasPin: req.user.hasPin,
+      locale: req.user.locale ?? "en",
     };
   }
 

@@ -116,6 +116,7 @@ model User {
   pinHash            String?
   pinFailedAttempts  Int           @default(0)
   pinLockedUntil     DateTime?
+  locale             String?
   roleId          String
   role            Role             @relation(fields: [roleId], references: [id])
   createdAt       DateTime         @default(now())

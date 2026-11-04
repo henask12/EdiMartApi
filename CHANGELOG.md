@@ -1,5 +1,18 @@
 # Changelog
 
+## Phase 2 - design system (API changes only)
+
+### Added (additive)
+- `User.locale` column (`ALTER TABLE "User" ADD COLUMN "locale" TEXT`).
+  Migration: `20261104000000_phase2_user_locale`.
+- `PATCH /auth/me` accepts optional `locale` string field.
+- `GET /auth/me` returns `locale` (defaults to `"en"` when null).
+- JWT payload includes `locale`.
+
+### No breaking changes
+This phase is a client-side design-system overhaul. The only API change is the additive
+`locale` field; no existing behaviour is altered.
+
 ## Phase 1 - one permission model
 
 ### Changed (contract)

@@ -179,7 +179,7 @@ export class UsersService {
 
   async updateProfile(
     userId: string,
-    data: { displayName?: string; email?: string },
+    data: { displayName?: string; email?: string; locale?: string },
   ) {
     const user = await this.findById(userId);
     if (!user) {
@@ -200,6 +200,7 @@ export class UsersService {
         email: data.email ? data.email.trim().toLowerCase() : undefined,
         displayName:
           data.displayName !== undefined ? data.displayName.trim() || null : undefined,
+        locale: data.locale !== undefined ? (data.locale || null) : undefined,
       },
       include: { role: true },
     });

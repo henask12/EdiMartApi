@@ -43,7 +43,7 @@ export class AuthService {
     };
   }
 
-  updateProfile(userId: string, data: { displayName?: string; email?: string }) {
+  updateProfile(userId: string, data: { displayName?: string; email?: string; locale?: string }) {
     return this.users.updateProfile(userId, data);
   }
 
