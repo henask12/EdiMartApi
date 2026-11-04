@@ -3,6 +3,15 @@ import { Prisma } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 
+const DEFAULT_POS_PAYMENT_METHODS = JSON.stringify([
+  { method: "CASH", enabled: true, requireReference: false, requireProof: false },
+  { method: "TELEBIRR", enabled: true, requireReference: true, requireProof: false },
+  { method: "CBE_BIRR", enabled: true, requireReference: true, requireProof: false },
+  { method: "MPESA", enabled: true, requireReference: true, requireProof: false },
+  { method: "BANK_TRANSFER", enabled: true, requireReference: true, requireProof: false },
+  { method: "CARD", enabled: true, requireReference: false, requireProof: false },
+]);
+
 /** Known settings and their defaults. Values are stored as JSON in StoreSetting rows. */
 export const SETTING_DEFAULTS = {
   /**
@@ -10,9 +19,60 @@ export const SETTING_DEFAULTS = {
    * PIN approval unless the person making it can approve (STOCK_COUNT_APPROVE).
    */
   "inventory.adjustmentApprovalThreshold": "5000",
+  "pos.vatRate": "15",
+  "pos.pricesIncludeVat": "true",
+  "pos.discountLimitPercent": "10",
+  "pos.returnWindowDays": "7",
+  "pos.receiptFooter": "",
+  "pos.receiptTin": "",
+  "pos.shopName": "Edi's Collection",
+  "pos.shopAddress": "",
+  "pos.shopPhone": "",
+  "pos.scannerBeep": "true",
+  "pos.favourites": "[]",
+  "pos.paymentMethods": DEFAULT_POS_PAYMENT_METHODS,
+  "pos.cashDenominations": "[50,100,200,500,1000]",
+  "pos.labelAsTaxInvoice": "false",
 } as const;
 
 export type SettingKey = keyof typeof SETTING_DEFAULTS;
+
+/** PATCH body aliases (camelCase) → setting keys. */
+const UPDATE_ALIASES: Record<string, SettingKey> = {
+  adjustmentApprovalThreshold: "inventory.adjustmentApprovalThreshold",
+  vatRate: "pos.vatRate",
+  pricesIncludeVat: "pos.pricesIncludeVat",
+  discountLimitPercent: "pos.discountLimitPercent",
+  returnWindowDays: "pos.returnWindowDays",
+  receiptFooter: "pos.receiptFooter",
+  receiptTin: "pos.receiptTin",
+  shopName: "pos.shopName",
+  shopAddress: "pos.shopAddress",
+  shopPhone: "pos.shopPhone",
+  scannerBeep: "pos.scannerBeep",
+  favourites: "pos.favourites",
+  paymentMethods: "pos.paymentMethods",
+  cashDenominations: "pos.cashDenominations",
+  labelAsTaxInvoice: "pos.labelAsTaxInvoice",
+};
+
+export type StoreSettingsUpdate = Partial<Record<SettingKey, string>> & {
+  adjustmentApprovalThreshold?: string;
+  vatRate?: string;
+  pricesIncludeVat?: string;
+  discountLimitPercent?: string;
+  returnWindowDays?: string;
+  receiptFooter?: string;
+  receiptTin?: string;
+  shopName?: string;
+  shopAddress?: string;
+  shopPhone?: string;
+  scannerBeep?: string;
+  favourites?: string;
+  paymentMethods?: string;
+  cashDenominations?: string;
+  labelAsTaxInvoice?: string;
+};
 
 @Injectable()
 export class StoreSettingsService {
@@ -37,25 +97,84 @@ export class StoreSettingsService {
     return new Prisma.Decimal(all["inventory.adjustmentApprovalThreshold"]);
   }
 
-  async update(userId: string, changes: { adjustmentApprovalThreshold?: string }) {
-    if (changes.adjustmentApprovalThreshold !== undefined) {
+  async getPosNumber(key: SettingKey, fallback: string): Promise<Prisma.Decimal> {
+    const all = await this.getAll();
+    try {
+      return new Prisma.Decimal(all[key] || fallback);
+    } catch {
+      return new Prisma.Decimal(fallback);
+    }
+  }
+
+  async update(userId: string, changes: StoreSettingsUpdate) {
+    const resolved = new Map<SettingKey, string>();
+
+    for (const [rawKey, rawValue] of Object.entries(changes)) {
+      if (rawValue === undefined || rawValue === null) {
+        continue;
+      }
+      if (typeof rawValue !== "string") {
+        throw new BadRequestException(`Setting ${rawKey} must be a string`);
+      }
+      const key =
+        (UPDATE_ALIASES[rawKey] as SettingKey | undefined) ??
+        (rawKey in SETTING_DEFAULTS ? (rawKey as SettingKey) : undefined);
+      if (!key) {
+        continue;
+      }
+      resolved.set(key, rawValue);
+    }
+
+    if (resolved.has("inventory.adjustmentApprovalThreshold")) {
+      const raw = resolved.get("inventory.adjustmentApprovalThreshold")!;
       let value: Prisma.Decimal;
       try {
-        value = new Prisma.Decimal(changes.adjustmentApprovalThreshold);
+        value = new Prisma.Decimal(raw);
       } catch {
         throw new BadRequestException("The approval limit must be a number");
       }
       if (value.lt(0)) {
         throw new BadRequestException("The approval limit cannot be negative");
       }
-      const key: SettingKey = "inventory.adjustmentApprovalThreshold";
+      resolved.set("inventory.adjustmentApprovalThreshold", value.toString());
+    }
+
+    for (const numericKey of ["pos.vatRate", "pos.discountLimitPercent", "pos.returnWindowDays"] as SettingKey[]) {
+      if (!resolved.has(numericKey)) {
+        continue;
+      }
+      let value: Prisma.Decimal;
+      try {
+        value = new Prisma.Decimal(resolved.get(numericKey)!);
+      } catch {
+        throw new BadRequestException(`${numericKey} must be a number`);
+      }
+      if (value.lt(0)) {
+        throw new BadRequestException(`${numericKey} cannot be negative`);
+      }
+      resolved.set(numericKey, value.toString());
+    }
+
+    for (const jsonKey of ["pos.favourites", "pos.paymentMethods", "pos.cashDenominations"] as SettingKey[]) {
+      if (!resolved.has(jsonKey)) {
+        continue;
+      }
+      try {
+        JSON.parse(resolved.get(jsonKey)!);
+      } catch {
+        throw new BadRequestException(`${jsonKey} must be valid JSON`);
+      }
+    }
+
+    for (const [key, value] of resolved) {
       await this.prisma.storeSetting.upsert({
         where: { key },
-        update: { value: value.toString(), updatedByUserId: userId },
-        create: { key, value: value.toString(), updatedByUserId: userId },
+        update: { value, updatedByUserId: userId },
+        create: { key, value, updatedByUserId: userId },
       });
-      await this.audit.log(userId, "UPDATE_SETTING", "StoreSetting", key, { value: value.toString() });
+      await this.audit.log(userId, "UPDATE_SETTING", "StoreSetting", key, { value });
     }
+
     return this.getAll();
   }
 }

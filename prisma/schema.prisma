@@ -175,6 +175,8 @@ model User {
   auditLogs       AuditLog[]
   stockMovements  StockMovement[]
   sales           Sale[]           @relation("SaleCreatedBy")
+  salesVoided     Sale[]           @relation("SaleVoidedBy")
+  paymentsTaken   PaymentAllocation[] @relation("PaymentTakenBy")
   stockBatches       StockBatch[]
   reservations       Reservation[]
   stockTransfers     StockTransfer[]      @relation("TransferCreatedBy")
@@ -182,6 +184,8 @@ model User {
   stockCounts        StockCount[]         @relation("CountCreatedBy")
   stockCountsPosted  StockCount[]         @relation("CountPostedBy")
   priceChanges       PriceChange[]
+  parkedCarts        ParkedCart[]
+  creditNotes        CreditNote[]         @relation("CreditNoteCreatedBy")
 }
 
 model AuditLog {
@@ -257,6 +261,7 @@ model Product {
   transferLines StockTransferLine[]
   countLines    StockCountLine[]
   snapshots     InventorySnapshot[]
+  creditNoteLines CreditNoteLine[]
 
   @@unique([categoryId, name])
   @@index([expiryDate])
@@ -293,6 +298,7 @@ model Location {
   stockCounts    StockCount[]
   defaultForProducts Product[]   @relation("ProductDefaultLocation")
   snapshots      InventorySnapshot[]
+  creditRestocks CreditNoteLine[]
   createdAt      DateTime        @default(now())
 
   @@index([storeCode, sellable])
@@ -383,19 +389,35 @@ model Reservation {
 model Sale {
   id              String                @id @default(cuid())
   saleNumber      String                @unique
+  /// COMPLETED | PARTIALLY_REFUNDED | REFUNDED | VOIDED
   status          String                @default("COMPLETED")
   subtotal        Decimal               @db.Decimal(12, 2)
   discountTotal   Decimal               @db.Decimal(12, 2) @default(0)
   taxTotal        Decimal               @db.Decimal(12, 2) @default(0)
   grandTotal      Decimal               @db.Decimal(12, 2)
+  /// Cashier note on the sale (distinct from movement notes).
+  notes           String?
+  /// Cart-level discount reason code when discountTotal > 0.
+  discountReason  String?
+  /// NONE | PENDING | REGISTERED | FAILED — FiscalService fills later.
+  fiscalStatus    String                @default("NONE")
+  fiscalRegistrationNumber String?
+  fiscalQrPayload String?
+  voidedAt        DateTime?
+  voidReason      String?
+  voidedByUserId  String?
+  voidedBy        User?                 @relation("SaleVoidedBy", fields: [voidedByUserId], references: [id])
   createdByUserId String
   createdBy       User                  @relation("SaleCreatedBy", fields: [createdByUserId], references: [id])
   createdAt       DateTime              @default(now())
   lines           SaleLine[]
   payments        PaymentAllocation[]
   attachments     SaleAttachment[]
+  creditNotes     CreditNote[]
 
   @@index([createdAt])
+  @@index([status, createdAt])
+  @@index([createdByUserId, createdAt])
 }
 
 model SaleAttachment {
@@ -416,11 +438,16 @@ model SaleLine {
   product      Product  @relation(fields: [productId], references: [id])
   quantity       Decimal  @db.Decimal(18, 4)
   unitPrice      Decimal  @db.Decimal(12, 2)
+  /// Shelf price before an override (null when unitPrice was not overridden).
+  originalUnitPrice Decimal? @db.Decimal(12, 2)
+  priceOverridden Boolean @default(false)
   unitCostAtSale Decimal  @db.Decimal(14, 4) @default(0)
   lineDiscount   Decimal  @db.Decimal(12, 2) @default(0)
+  discountReason String?
   taxAmount    Decimal  @db.Decimal(12, 2) @default(0)
   lineTotal    Decimal  @db.Decimal(12, 2)
   batchAllocations SaleLineBatch[]
+  creditLines  CreditNoteLine[]
 }
 
 /// FEFO batch allocations for a sale line (traceability).
@@ -453,6 +480,79 @@ model PaymentAllocation {
   method PaymentMethod
   amount Decimal       @db.Decimal(12, 2)
   reference String?
+  /// Cash tendered (may exceed amount); change = tendered − amount for CASH.
+  tenderedAmount Decimal? @db.Decimal(12, 2)
+  changeAmount   Decimal? @db.Decimal(12, 2)
+  proofImagePath String?
+  createdByUserId String?
+  createdBy       User?   @relation("PaymentTakenBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+}
+
+enum CreditCondition {
+  RESTOCK
+  DAMAGED
+  NEEDS_INSPECTION
+}
+
+/// Linked credit document for void or return; original Sale is never edited away.
+model CreditNote {
+  id              String          @id @default(cuid())
+  creditNumber    String          @unique
+  saleId          String
+  sale            Sale            @relation(fields: [saleId], references: [id])
+  /// VOID | RETURN | EXCHANGE
+  kind            String
+  reason          String
+  condition       CreditCondition @default(RESTOCK)
+  refundMethod    PaymentMethod?
+  refundAmount    Decimal         @db.Decimal(12, 2)
+  refundReference String?
+  notes           String?
+  createdByUserId String
+  createdBy       User            @relation("CreditNoteCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime        @default(now())
+  lines           CreditNoteLine[]
+
+  @@index([saleId])
+  @@index([createdAt])
+}
+
+model CreditNoteLine {
+  id            String      @id @default(cuid())
+  creditNoteId  String
+  creditNote    CreditNote  @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  saleLineId    String
+  saleLine      SaleLine    @relation(fields: [saleLineId], references: [id])
+  productId     String
+  product       Product     @relation(fields: [productId], references: [id])
+  quantity      Decimal     @db.Decimal(18, 4)
+  unitPrice     Decimal     @db.Decimal(12, 2)
+  lineTotal     Decimal     @db.Decimal(12, 2)
+  /// Where returned stock was put (sellable or quarantine).
+  restockLocationId String?
+  restockLocation   Location? @relation(fields: [restockLocationId], references: [id])
+
+  @@index([creditNoteId])
+  @@index([saleLineId])
+  @@index([productId])
+}
+
+/// Parked POS cart; expires at end of business day (Africa/Addis_Ababa).
+model ParkedCart {
+  id              String   @id @default(cuid())
+  label           String
+  notes           String?
+  /// JSON snapshot of cart lines + discounts for resume.
+  payload         Json
+  createdByUserId String
+  createdBy       User     @relation(fields: [createdByUserId], references: [id])
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  resumedAt       DateTime?
+
+  @@index([createdByUserId, createdAt])
+  @@index([expiresAt])
 }
 
 model NotificationEmail {

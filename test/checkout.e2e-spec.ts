@@ -229,4 +229,84 @@ describe("checkout", () => {
     expect((await checkout(t, token, sale(product.id, "0"))).status).toBe(400);
     expect((await checkout(t, token, sale(product.id, "abc"))).status).toBe(400);
   });
+
+  it("computes VAT-inclusive tax and line discount for STANDARD items", async () => {
+    const ownerToken = await login(t, "owner@test.local");
+    const { product } = await createProduct(t.prisma, locationId, { stock: 5, price: 115 });
+    await t.prisma.product.update({
+      where: { id: product.id },
+      data: { taxCategory: "STANDARD" },
+    });
+    const res = await checkout(t, ownerToken, {
+      lines: [{ productId: product.id, quantity: "1", lineDiscount: "15" }],
+      discountReason: "promo",
+    });
+    expect(res.status).toBe(201);
+    // line total 100; VAT portion at 15% inclusive = 100 * 15/115
+    expect(res.body.sale.subtotal).toBe("100.00");
+    expect(res.body.sale.discountTotal).toBe("15.00");
+    expect(res.body.sale.taxTotal).toBe("13.04");
+    expect(res.body.sale.grandTotal).toBe("100.00");
+    expect(res.body.sale.lines[0].taxAmount).toBe("13.04");
+  });
+
+  it("accepts split payments that sum to the grand total", async () => {
+    const { product } = await createProduct(t.prisma, locationId, { stock: 5, price: 100 });
+    const res = await checkout(t, token, {
+      lines: [{ productId: product.id, quantity: "1" }],
+      payments: [
+        { method: "CASH", amount: "40", tenderedAmount: "50" },
+        { method: "TELEBIRR", amount: "60", reference: "TX-SPLIT-1" },
+      ],
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.sale.payments).toHaveLength(2);
+    const cash = res.body.sale.payments.find((p: { method: string }) => p.method === "CASH");
+    expect(cash.changeAmount).toBe("10.00");
+    expect(cash.tenderedAmount).toBe("50.00");
+  });
+
+  it("rejects a discount above the limit without manager approval", async () => {
+    const { product } = await createProduct(t.prisma, locationId, { stock: 5, price: 100 });
+    // Cashier has SALES_CREATE but not DISCOUNT_APPLY / DISCOUNT_ABOVE_LIMIT.
+    const denied = await checkout(t, token, {
+      lines: [{ productId: product.id, quantity: "1", lineDiscount: "20" }],
+    });
+    expect(denied.status).toBe(403);
+
+    // Grant DISCOUNT_APPLY only — still over the 10% default limit.
+    const cashierRole = await t.prisma.role.findUniqueOrThrow({ where: { name: "CASHIER" } });
+    await t.prisma.rolePermission.create({
+      data: { roleId: cashierRole.id, permission: "DISCOUNT_APPLY" },
+    });
+    token = await login(t, "cashier@test.local");
+    const over = await checkout(t, token, {
+      lines: [{ productId: product.id, quantity: "1", lineDiscount: "20" }],
+    });
+    expect(over.status).toBe(403);
+    expect(over.body.code).toBe("APPROVAL_REQUIRED");
+    expect(over.body.action).toBe("DISCOUNT_OVER_LIMIT");
+
+    const ownerToken = await login(t, "owner@test.local");
+    await request(t.http())
+      .put("/auth/pin")
+      .set(bearer(ownerToken))
+      .send({ currentPassword: "Test-Password-123", pin: "4821" });
+    const owner = await t.prisma.user.findFirstOrThrow({ where: { email: "owner@test.local" } });
+    const approved = await request(t.http())
+      .post("/approvals")
+      .set(bearer(token))
+      .send({ managerId: owner.id, pin: "4821", action: "DISCOUNT_OVER_LIMIT" });
+    expect(approved.status).toBe(201);
+
+    const ok = await request(t.http())
+      .post("/sales/checkout")
+      .set(bearer(token))
+      .set("Idempotency-Key", `disc-ok-${Date.now()}`)
+      .set("X-Approval-Token", approved.body.token)
+      .send({ lines: [{ productId: product.id, quantity: "1", lineDiscount: "20" }] });
+    expect(ok.status).toBe(201);
+    expect(ok.body.sale.discountTotal).toBe("20.00");
+    expect(ok.body.sale.grandTotal).toBe("80.00");
+  });
 });

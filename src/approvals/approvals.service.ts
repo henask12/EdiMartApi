@@ -17,8 +17,8 @@ import { PermissionsService } from "../permissions/permissions.service";
 
 /**
  * Things a manager can approve with their PIN, and the permission the approver must hold.
- * Only STOCK_ADJUST_OVER_LIMIT is consumed today; the rest are wired when their screens exist
- * (discounts and voids in Phase 4, the cash drawer in Phase 5).
+ * Consumed by inventory adjustments (STOCK_ADJUST_OVER_LIMIT) and Phase 4 POS
+ * (PRICE_OVERRIDE, DISCOUNT_OVER_LIMIT, SALE_VOID, REFUND_OUTSIDE_WINDOW). Cash drawer is Phase 5.
  */
 export const APPROVAL_ACTIONS = {
   STOCK_ADJUST_OVER_LIMIT: PermissionKey.STOCK_COUNT_APPROVE,

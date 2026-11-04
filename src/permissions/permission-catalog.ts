@@ -63,11 +63,11 @@ const spec: Record<PermissionKey, Spec> = {
   [P.SALES_VIEW_OWN]: { group: "Sales", description: "See the sales you recorded yourself." },
   [P.SALES_VIEW_ALL]: { group: "Sales", description: "See every sale, whoever recorded it." },
   [P.SALES_EXPORT]: { group: "Sales", description: "Download the sales list as CSV, Excel or PDF." },
-  [P.SALES_VOID]: { group: "Sales", description: "Void a sale made earlier the same day.", sensitive: true, status: "planned", plannedPhase: 4 },
-  [P.SALES_REFUND]: { group: "Sales", description: "Refund or take back a sale.", sensitive: true, status: "planned", plannedPhase: 4 },
-  [P.DISCOUNT_APPLY]: { group: "Sales", description: "Give discounts within the allowed limit.", status: "planned", plannedPhase: 4 },
-  [P.DISCOUNT_ABOVE_LIMIT]: { group: "Sales", description: "Give discounts above the normal limit (also lets a manager approve one with their PIN).", sensitive: true, status: "planned", plannedPhase: 4 },
-  [P.PRICE_OVERRIDE]: { group: "Sales", description: "Change the price of an item during a sale.", sensitive: true, status: "planned", plannedPhase: 4 },
+  [P.SALES_VOID]: { group: "Sales", description: "Void a sale made earlier the same day.", sensitive: true },
+  [P.SALES_REFUND]: { group: "Sales", description: "Refund or take back a sale.", sensitive: true },
+  [P.DISCOUNT_APPLY]: { group: "Sales", description: "Give discounts within the allowed limit." },
+  [P.DISCOUNT_ABOVE_LIMIT]: { group: "Sales", description: "Give discounts above the normal limit (also lets a manager approve one with their PIN).", sensitive: true },
+  [P.PRICE_OVERRIDE]: { group: "Sales", description: "Change the price of an item during a sale.", sensitive: true },
 
   // Cash and shifts
   [P.CASH_DRAWER_OPEN]: { group: "Cash and shifts", description: "Open the cash drawer without a sale.", sensitive: true, status: "planned", plannedPhase: 5 },

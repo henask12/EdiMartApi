@@ -10,6 +10,62 @@ class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   adjustmentApprovalThreshold?: string;
+
+  @IsOptional()
+  @IsString()
+  vatRate?: string;
+
+  @IsOptional()
+  @IsString()
+  pricesIncludeVat?: string;
+
+  @IsOptional()
+  @IsString()
+  discountLimitPercent?: string;
+
+  @IsOptional()
+  @IsString()
+  returnWindowDays?: string;
+
+  @IsOptional()
+  @IsString()
+  receiptFooter?: string;
+
+  @IsOptional()
+  @IsString()
+  receiptTin?: string;
+
+  @IsOptional()
+  @IsString()
+  shopName?: string;
+
+  @IsOptional()
+  @IsString()
+  shopAddress?: string;
+
+  @IsOptional()
+  @IsString()
+  shopPhone?: string;
+
+  @IsOptional()
+  @IsString()
+  scannerBeep?: string;
+
+  @IsOptional()
+  @IsString()
+  favourites?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentMethods?: string;
+
+  @IsOptional()
+  @IsString()
+  cashDenominations?: string;
+
+  @IsOptional()
+  @IsString()
+  labelAsTaxInvoice?: string;
 }
 
 @Controller("settings/store")

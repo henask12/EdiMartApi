@@ -1,5 +1,40 @@
 # Changelog
 
+## Phase 4 — POS selling core (API)
+
+### Added
+- **POS store settings** (`pos.*` keys on `GET/PATCH /settings/store`): VAT rate (default 15%),
+  prices-include-VAT, discount limit %, return window days, receipt shop fields, scanner beep,
+  favourites JSON, payment method config, cash denominations, label-as-tax-invoice.
+- **FiscalService** no-op driver (`registerSale` → `{ status: 'NONE' }`); called after checkout
+  without blocking the sale. Sale fiscal columns reserved for a real driver later.
+- **Checkout expansions** (backward compatible): line `unitPrice` override, line/cart discounts
+  (fixed or %), split `payments[]` with cash tendered/change, VAT-inclusive tax math by
+  `Product.taxCategory`, discount/price-override permission + `X-Approval-Token` approvals
+  (`PRICE_OVERRIDE`, `DISCOUNT_OVER_LIMIT`).
+- **Parked carts**: `GET /sales/parked`, `POST /sales/park`, `DELETE /sales/parked/:id`,
+  `POST /sales/parked/:id/resume` — expire at end of business day (Africa/Addis_Ababa).
+- **Void**: `POST /sales/:id/void` (`SALES_VOID`) — restocks via RETURN movements (reversing
+  `SaleLineBatch` where possible), CreditNote kind VOID, status VOIDED. Prior business day needs
+  `SALE_VOID` approval.
+- **Return**: `POST /sales/:id/return` (`SALES_REFUND`) — partial/full returns with
+  RESTOCK|DAMAGED|NEEDS_INSPECTION, window from settings (`REFUND_OUTSIDE_WINDOW` approval),
+  CreditNote kind RETURN, status PARTIALLY_REFUNDED / REFUNDED.
+- **Receipts**: `GET /sales/:id/receipt` (structured JSON) and public
+  `GET /sales/receipt/:token` (HMAC-signed, `FILE_URL_SECRET` / `JWT_SECRET`).
+- List filters: `cashierUserId`, `paymentMethod`, `status`.
+- Permissions now **active**: `SALES_VOID`, `SALES_REFUND`, `DISCOUNT_APPLY`,
+  `DISCOUNT_ABOVE_LIMIT`, `PRICE_OVERRIDE`.
+
+### Database (additive only)
+- Migration `20261104140000_phase4_pos`: Sale notes/fiscal/void fields; SaleLine override fields;
+  PaymentAllocation tender/change/proof/cashier; `CreditNote` + `CreditNoteLine`; `ParkedCart`;
+  `CreditCondition` enum.
+
+### Defaults (owner-approved for this phase)
+- VAT 15%, prices include VAT; walk-in only (no Customer); payment methods = existing enum only
+  (no store credit); parked carts expire end of business day.
+
 ## Phase 3 — Inventory core
 
 ### Follow-ups (same phase)

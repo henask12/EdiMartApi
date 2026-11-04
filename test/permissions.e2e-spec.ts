@@ -82,11 +82,18 @@ const RULES: Rule[] = [
   // Locations
   { method: "post", path: "/locations", all: [K.LOCATIONS_MANAGE] },
   { method: "patch", path: "/locations/some-id", all: [K.LOCATIONS_MANAGE] },
-  { method: "get", path: "/sales", any: [K.SALES_VIEW, K.SALES_VIEW_OWN, K.SALES_VIEW_ALL] },
-  { method: "get", path: "/sales/some-id", any: [K.SALES_VIEW, K.SALES_VIEW_OWN, K.SALES_VIEW_ALL] },
   { method: "get", path: "/sales/export", all: [K.SALES_EXPORT] },
   { method: "get", path: "/sales/today-summary", all: [K.REPORTING_VIEW] },
+  { method: "get", path: "/sales/parked", all: [K.SALES_CREATE] },
+  { method: "post", path: "/sales/park", all: [K.SALES_CREATE] },
+  { method: "delete", path: "/sales/parked/some-id", all: [K.SALES_CREATE] },
+  { method: "post", path: "/sales/parked/some-id/resume", all: [K.SALES_CREATE] },
+  { method: "get", path: "/sales", any: [K.SALES_VIEW, K.SALES_VIEW_OWN, K.SALES_VIEW_ALL] },
   { method: "post", path: "/sales/checkout", all: [K.SALES_CREATE] },
+  { method: "get", path: "/sales/some-id/receipt", any: [K.SALES_VIEW, K.SALES_VIEW_OWN, K.SALES_VIEW_ALL] },
+  { method: "post", path: "/sales/some-id/void", all: [K.SALES_VOID] },
+  { method: "post", path: "/sales/some-id/return", all: [K.SALES_REFUND] },
+  { method: "get", path: "/sales/some-id", any: [K.SALES_VIEW, K.SALES_VIEW_OWN, K.SALES_VIEW_ALL] },
   { method: "get", path: "/reporting/dashboard", all: [K.REPORTING_VIEW] },
   { method: "get", path: "/reporting/sales?period=day", all: [K.REPORTING_VIEW] },
   { method: "get", path: "/reservations", all: [K.RESERVATIONS_MANAGE] },
@@ -237,6 +244,8 @@ describe("one permission model", () => {
     it("an inactive route list: public routes stay public", async () => {
       expect((await request(t.http()).get("/health")).status).toBe(200);
       expect((await request(t.http()).get("/")).status).toBe(200);
+      // Signed digital receipt is public; a garbage token still must not require auth (404).
+      expect((await request(t.http()).get("/sales/receipt/not-a-valid-token")).status).toBe(404);
     });
   });
 

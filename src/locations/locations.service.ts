@@ -26,6 +26,21 @@ export class LocationsService {
     return loc;
   }
 
+  /** Non-sellable quarantine location (damaged / inspection returns). */
+  async getQuarantine() {
+    const loc = await this.prisma.location.findFirst({
+      where: {
+        isActive: true,
+        OR: [{ code: "QUARANTINE" }, { storeCode: "QUARANTINE" }],
+      },
+      orderBy: { sortOrder: "asc" },
+    });
+    if (!loc) {
+      throw new NotFoundException("Quarantine location not configured");
+    }
+    return loc;
+  }
+
   async listSellableLocationIds(storeCode = "DEFAULT_STORE"): Promise<string[]> {
     const rows = await this.prisma.location.findMany({
       where: { storeCode, sellable: true, isActive: true },

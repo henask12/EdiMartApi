@@ -332,7 +332,7 @@ export class ReservationsService {
     }
 
     const checkout = await this.sales.checkout(
-      userId,
+      actor,
       {
         lines: [
           {
