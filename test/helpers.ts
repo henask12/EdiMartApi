@@ -7,6 +7,7 @@ import request from "supertest";
 import { AppModule } from "../src/app.module";
 import { configureApp } from "../src/app.setup";
 import { BUILTIN_ROLES, OWNER_ROLE } from "../src/common/role.constants";
+import { DEFAULT_ROLE_PERMISSIONS } from "../src/permissions/role-defaults";
 import { PrismaService } from "../src/prisma/prisma.service";
 
 export type TestApp = { app: NestExpressApplication; prisma: PrismaService; http: () => any };
@@ -35,6 +36,12 @@ export const seedBasics = async (prisma: PrismaClient) => {
   const roles: Record<string, { id: string; name: string }> = {};
   for (const name of BUILTIN_ROLES) {
     roles[name] = await prisma.role.create({ data: { name, isProtected: name === OWNER_ROLE } });
+    if (name !== OWNER_ROLE) {
+      // roles have exactly the permissions stored for them, as in production after Phase 1
+      await prisma.rolePermission.createMany({
+        data: (DEFAULT_ROLE_PERMISSIONS[name] ?? []).map((permission) => ({ roleId: roles[name].id, permission })),
+      });
+    }
   }
   const location = await prisma.location.create({ data: { code: "DEFAULT_STORE", name: "Main Store" } });
   const hash = await bcrypt.hash(PASSWORD, 4);

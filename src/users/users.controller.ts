@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { PermissionKey } from "@prisma/client";
 import { RequirePermissions } from "../common/decorators/permissions.decorator";
+import type { Actor } from "../permissions/permissions.service";
 import { IsBoolean, IsEmail, IsOptional, IsString, MinLength } from "class-validator";
 import { UsersService } from "./users.service";
 
@@ -44,7 +45,7 @@ class ResetPasswordDto {
   password!: string;
 }
 
-type Authed = { user: { userId: string } };
+type Authed = { user: Actor };
 
 @Controller("users")
 @RequirePermissions(PermissionKey.USERS_MANAGE)
@@ -61,16 +62,16 @@ export class UsersController {
 
   @Post()
   create(@Req() req: Authed, @Body() body: CreateUserDto) {
-    return this.users.create(req.user.userId, body);
+    return this.users.create(req.user, body);
   }
 
   @Patch(":id")
   update(@Req() req: Authed, @Param("id") id: string, @Body() body: UpdateUserDto) {
-    return this.users.update(req.user.userId, id, body);
+    return this.users.update(req.user, id, body);
   }
 
   @Post(":id/reset-password")
   resetPassword(@Req() req: Authed, @Param("id") id: string, @Body() body: ResetPasswordDto) {
-    return this.users.resetPassword(req.user.userId, id, body.password);
+    return this.users.resetPassword(req.user, id, body.password);
   }
 }

@@ -1,9 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from "@nestjs/common";
-import { OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import { IsString, MinLength } from "class-validator";
 import { PermissionKey } from "@prisma/client";
 import { RequirePermissions } from "../common/decorators/permissions.decorator";
-import { Roles } from "../common/decorators/roles.decorator";
 import { ProductTypesService } from "./product-types.service";
 
 class ProductTypeDto {
@@ -30,19 +28,19 @@ export class ProductTypesController {
     return this.productTypes.get(id);
   }
 
-  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.PRODUCT_TYPES_MANAGE)
   @Post()
   create(@Req() req: Authed, @Body() body: ProductTypeDto) {
     return this.productTypes.create(req.user.userId, body.name);
   }
 
-  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.PRODUCT_TYPES_MANAGE)
   @Patch(":id")
   update(@Req() req: Authed, @Param("id") id: string, @Body() body: ProductTypeDto) {
     return this.productTypes.update(req.user.userId, id, body.name);
   }
 
-  @Roles(OWNER_ROLE)
+  @RequirePermissions(PermissionKey.PRODUCT_TYPES_MANAGE)
   @Delete(":id")
   remove(@Req() req: Authed, @Param("id") id: string) {
     return this.productTypes.remove(req.user.userId, id);

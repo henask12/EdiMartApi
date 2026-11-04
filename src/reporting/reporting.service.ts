@@ -13,12 +13,12 @@ export class ReportingService {
     private readonly sales: SalesService,
   ) {}
 
-  async dashboard() {
+  async dashboard(includeCost = false) {
     const defaultLoc = await this.locations.getDefault();
-    const today = await this.sales.todaySummary();
-    const week = await this.sales.salesForPeriod("week");
-    const month = await this.sales.salesForPeriod("month");
-    const year = await this.sales.salesForPeriod("year");
+    const today = await this.sales.todaySummary(includeCost);
+    const week = await this.sales.salesForPeriod("week", undefined, includeCost);
+    const month = await this.sales.salesForPeriod("month", undefined, includeCost);
+    const year = await this.sales.salesForPeriod("year", undefined, includeCost);
 
     const items = await this.prisma.inventoryItem.findMany({
       where: { locationId: defaultLoc.id },
@@ -80,22 +80,22 @@ export class ReportingService {
       today: {
         grandTotal: today.grandTotal,
         saleCount: today.saleCount,
-        netProfit: today.netProfit,
+        ...(includeCost ? { netProfit: today.netProfit } : {}),
       },
       week: {
         grandTotal: week.grandTotal,
         saleCount: week.saleCount,
-        netProfit: week.netProfit,
+        ...(includeCost ? { netProfit: week.netProfit } : {}),
       },
       month: {
         grandTotal: month.grandTotal,
         saleCount: month.saleCount,
-        netProfit: month.netProfit,
+        ...(includeCost ? { netProfit: month.netProfit } : {}),
       },
       year: {
         grandTotal: year.grandTotal,
         saleCount: year.saleCount,
-        netProfit: year.netProfit,
+        ...(includeCost ? { netProfit: year.netProfit } : {}),
       },
       needsRestock,
       expiringSoon: expiringSoon.map((b) => ({
@@ -111,12 +111,12 @@ export class ReportingService {
         customerName: r.customerName,
         createdAt: r.createdAt.toISOString(),
       })),
-      stockValue: stockValue.toFixed(2),
+      ...(includeCost ? { stockValue: stockValue.toFixed(2) } : {}),
       productCount: items.length,
     };
   }
 
-  salesByPeriod(period: "day" | "week" | "month" | "year", date?: string) {
-    return this.sales.salesForPeriod(period, date);
+  salesByPeriod(period: "day" | "week" | "month" | "year", date?: string, includeCost = false) {
+    return this.sales.salesForPeriod(period, date, includeCost);
   }
 }

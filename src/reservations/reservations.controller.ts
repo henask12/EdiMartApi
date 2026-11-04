@@ -1,10 +1,9 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { PermissionKey, ReservationStatus } from "@prisma/client";
 import { RequirePermissions } from "../common/decorators/permissions.decorator";
-import { CASHIER_ROLE, OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import { IsEnum, IsOptional, IsString } from "class-validator";
-import { Roles } from "../common/decorators/roles.decorator";
 import { ReservationsService } from "./reservations.service";
+import type { Actor } from "../permissions/permissions.service";
 
 class CreateReservationDto {
   @IsString()
@@ -32,7 +31,7 @@ class UpdateReservationDto {
   customerName?: string;
 }
 
-type Authed = { user: { userId: string } };
+type Authed = { user: Actor };
 
 @Controller("reservations")
 export class ReservationsController {
@@ -54,33 +53,33 @@ export class ReservationsController {
     });
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.PRODUCTS_RESERVE)
   @Post()
   create(@Req() req: Authed, @Body() body: CreateReservationDto) {
     return this.reservations.create(req.user.userId, body);
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.RESERVATIONS_MANAGE)
   @Patch(":id")
   update(@Req() req: Authed, @Param("id") id: string, @Body() body: UpdateReservationDto) {
     return this.reservations.update(req.user.userId, id, body);
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.RESERVATIONS_MANAGE)
   @Post(":id/update")
   updatePost(@Req() req: Authed, @Param("id") id: string, @Body() body: UpdateReservationDto) {
     return this.reservations.update(req.user.userId, id, body);
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.RESERVATIONS_MANAGE)
   @Post(":id/cancel")
   cancel(@Req() req: Authed, @Param("id") id: string) {
     return this.reservations.cancel(req.user.userId, id);
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE)
+  @RequirePermissions(PermissionKey.RESERVATIONS_MANAGE, PermissionKey.SALES_CREATE)
   @Post(":id/complete")
   complete(@Req() req: Authed, @Param("id") id: string) {
-    return this.reservations.completeAsSale(req.user.userId, id);
+    return this.reservations.completeAsSale(req.user, id);
   }
 }

@@ -1,9 +1,10 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { MovementType, Prisma } from "@prisma/client";
+import { MovementType, PermissionKey, Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { LocationsService } from "../locations/locations.service";
 import { AuditService } from "../audit/audit.service";
@@ -11,6 +12,10 @@ import { NotificationsService } from "../notifications/notifications.service";
 import { buildCreatedAtRange } from "../common/date-range.util";
 import { allocateFromBatches, lockInventoryRows, productStockSnapshot } from "../common/stock.util";
 import { ExportService, type ExportColumn } from "../export/export.service";
+import { hasPermission, omit } from "../permissions/access";
+import type { Actor } from "../permissions/permissions.service";
+import { ApprovalsService } from "../approvals/approvals.service";
+import { StoreSettingsService } from "../settings/store-settings.service";
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
 
@@ -37,6 +42,8 @@ export class InventoryService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly exportService: ExportService,
+    private readonly approvals: ApprovalsService,
+    private readonly settings: StoreSettingsService,
   ) {}
 
   async listMovements(params: {
@@ -46,7 +53,7 @@ export class InventoryService {
     to?: string;
     take?: number;
     skip?: number;
-  }) {
+  }, includeCost = false) {
     const take = Math.min(params.take ?? 100, 500);
     const skip = params.skip ?? 0;
     const where: Prisma.StockMovementWhereInput = {};
@@ -74,7 +81,7 @@ export class InventoryService {
       }),
       this.prisma.stockMovement.count({ where }),
     ]);
-    const items = await this.mapMovementList(rows);
+    const items = await this.mapMovementList(rows, includeCost);
     return { items, total, skip, take };
   }
 
@@ -94,7 +101,7 @@ export class InventoryService {
     };
   }
 
-  private async mapMovementList(rows: MovementListRow[]) {
+  private async mapMovementList(rows: MovementListRow[], includeCost: boolean) {
     const reservationIds = [
       ...new Set(
         rows
@@ -126,13 +133,19 @@ export class InventoryService {
         notes: m.notes,
         refType: m.refType,
         refId: m.refId,
-        inventoryItem: m.inventoryItem,
+        // average cost, product cost price and batch unit cost are only for people who may see costs
+        inventoryItem: includeCost
+          ? m.inventoryItem
+          : {
+              ...omit(m.inventoryItem, "averageCost"),
+              product: omit(m.inventoryItem.product, "costPrice"),
+            },
         stockBatch: batch
           ? {
-              ...batch,
+              ...omit(batch, "unitCost"),
               qtyReceived: batch.qtyReceived.toString(),
               qtyRemaining: batch.qtyRemaining.toString(),
-              unitCost: batch.unitCost.toString(),
+              ...(includeCost ? { unitCost: batch.unitCost.toString() } : {}),
             }
           : null,
         createdBy: m.createdBy,
@@ -148,7 +161,7 @@ export class InventoryService {
     });
   }
 
-  async getMovement(id: string) {
+  async getMovement(id: string, includeCost = false) {
     const movement = await this.prisma.stockMovement.findUnique({
       where: { id },
       include: {
@@ -165,10 +178,10 @@ export class InventoryService {
     if (!movement) {
       throw new NotFoundException("Stock movement not found");
     }
-    const [mapped] = await this.mapMovementList([movement]);
+    const [mapped] = await this.mapMovementList([movement], includeCost);
     return {
       ...mapped,
-      unitCost: movement.unitCost?.toString() ?? null,
+      ...(includeCost ? { unitCost: movement.unitCost?.toString() ?? null } : {}),
     };
   }
 
@@ -296,13 +309,17 @@ export class InventoryService {
     return { items, total: items.length, days };
   }
 
-  listBatches(productId: string, params?: { skip?: number; take?: number }) {
+  async listBatches(
+    productId: string,
+    params?: { skip?: number; take?: number },
+    includeCost = false,
+  ) {
     if (!productId) {
       throw new BadRequestException("productId is required");
     }
     const take = Math.min(params?.take ?? 50, 200);
     const skip = params?.skip ?? 0;
-    return this.prisma.stockBatch.findMany({
+    const rows = await this.prisma.stockBatch.findMany({
       where: { productId },
       orderBy: { receivedAt: "desc" },
       skip,
@@ -311,6 +328,24 @@ export class InventoryService {
         receivedBy: { select: { id: true, displayName: true, email: true } },
       },
     });
+    return includeCost ? rows : rows.map((row) => omit(row, "unitCost"));
+  }
+
+  /** What a stock change returns: quantities only, never the average cost. */
+  private summarize(inv: {
+    id: string;
+    productId: string;
+    locationId: string;
+    quantityOnHand: Prisma.Decimal;
+    updatedAt: Date;
+  }) {
+    return {
+      id: inv.id,
+      productId: inv.productId,
+      locationId: inv.locationId,
+      quantityOnHand: inv.quantityOnHand.toString(),
+      updatedAt: inv.updatedAt,
+    };
   }
 
   async receiveGoods(
@@ -412,13 +447,21 @@ export class InventoryService {
       quantity: data.quantity,
     });
     await this.notifications.checkLowStockForProduct(data.productId);
-    return updated;
+    return this.summarize(updated);
   }
 
+  /**
+   * Correct stock by hand. A correction worth more than the approval limit (quantity x average
+   * cost, setting `inventory.adjustmentApprovalThreshold`) needs a manager: either the person holds
+   * STOCK_COUNT_APPROVE themselves, or they pass a manager's single-use PIN approval token. The
+   * approving manager is written to the audit log.
+   */
   async adjustStock(
-    userId: string,
+    actor: Actor,
     data: { productId: string; quantityDelta: string; notes?: string },
+    approvalToken?: string,
   ) {
+    const userId = actor.userId;
     const delta = toDecimal(data.quantityDelta);
     if (delta.eq(0)) {
       throw new BadRequestException("quantityDelta cannot be zero");
@@ -435,7 +478,38 @@ export class InventoryService {
     if (!inv) {
       throw new NotFoundException("Inventory row not found for product");
     }
+
+    const unitCost = inv.averageCost.gt(0)
+      ? inv.averageCost
+      : (
+          await this.prisma.product.findUniqueOrThrow({
+            where: { id: data.productId },
+            select: { costPrice: true },
+          })
+        ).costPrice;
+    const value = delta.abs().mul(unitCost);
+    const threshold = await this.settings.getAdjustmentThreshold();
+    const needsApproval = value.gt(threshold) && !hasPermission(actor, PermissionKey.STOCK_COUNT_APPROVE);
+    if (needsApproval && !approvalToken) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        error: "Forbidden",
+        code: "APPROVAL_REQUIRED",
+        action: "STOCK_ADJUST_OVER_LIMIT",
+        message: `This correction is worth ${value.toFixed(2)} Birr, above the ${threshold.toFixed(2)} Birr limit. A manager must approve it with their PIN.`,
+        value: value.toFixed(2),
+        threshold: threshold.toFixed(2),
+      });
+    }
+
+    let approvedByUserId: string | undefined;
     const updated = await this.prisma.$transaction(async (tx) => {
+      if (needsApproval && approvalToken) {
+        // inside the transaction: if the correction fails, the approval is not used up
+        approvedByUserId = (
+          await this.approvals.consume(tx, approvalToken, "STOCK_ADJUST_OVER_LIMIT", userId)
+        ).approverId;
+      }
       await lockInventoryRows(tx, [data.productId], defaultLoc.id);
       const current = await tx.inventoryItem.findUniqueOrThrow({
         where: { id: inv.id },
@@ -458,6 +532,7 @@ export class InventoryService {
           refType: "MANUAL_ADJUSTMENT",
           notes: data.notes,
           createdByUserId: userId,
+          metadata: approvedByUserId ? { approvedByUserId } : undefined,
         },
       });
       return tx.inventoryItem.update({
@@ -468,9 +543,11 @@ export class InventoryService {
     await this.audit.log(userId, "ADJUST", "InventoryItem", updated.id, {
       productId: data.productId,
       quantityDelta: data.quantityDelta,
+      value: value.toFixed(2),
+      ...(approvedByUserId ? { approvedByUserId } : {}),
     });
     await this.notifications.checkLowStockForProduct(data.productId);
-    return updated;
+    return this.summarize(updated);
   }
 
   async returnToStock(
@@ -523,6 +600,6 @@ export class InventoryService {
       quantity: data.quantity,
     });
     await this.notifications.checkLowStockForProduct(data.productId);
-    return updated;
+    return this.summarize(updated);
   }
 }

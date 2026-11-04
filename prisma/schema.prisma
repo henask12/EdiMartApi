@@ -30,6 +30,38 @@ enum PermissionKey {
   ROLES_MANAGE
   SETTINGS_EMAILS
   REPORTING_VIEW
+  // Phase 1 additions (see src/permissions/permission-catalog.ts)
+  SALES_VIEW_OWN
+  SALES_VIEW_ALL
+  SALES_VOID
+  SALES_REFUND
+  DISCOUNT_APPLY
+  DISCOUNT_ABOVE_LIMIT
+  PRICE_OVERRIDE
+  CASH_DRAWER_OPEN
+  SHIFT_MANAGE
+  SHIFT_VIEW_ALL
+  CUSTOMERS_VIEW
+  CUSTOMERS_MANAGE
+  CUSTOMER_CREDIT_MANAGE
+  PROMOTIONS_MANAGE
+  SUPPLIERS_MANAGE
+  PURCHASING_MANAGE
+  PURCHASE_APPROVE
+  SUPPLIER_PAYMENTS_MANAGE
+  STOCK_VIEW
+  STOCK_COUNT
+  STOCK_COUNT_APPROVE
+  STOCK_ADJUST
+  STOCK_TRANSFER
+  STOCK_WRITE_OFF
+  PRICES_MANAGE
+  LOCATIONS_MANAGE
+  LABELS_PRINT
+  REPORTS_VIEW_COST_PROFIT
+  EXPORTS_RUN
+  SETTINGS_MANAGE
+  AUDIT_VIEW
 }
 
 enum ReservationStatus {
@@ -80,6 +112,10 @@ model User {
   displayName     String?
   isActive        Boolean          @default(true)
   mustChangePassword Boolean       @default(false)
+  /// bcrypt hash of the optional 4-6 digit manager approval PIN.
+  pinHash            String?
+  pinFailedAttempts  Int           @default(0)
+  pinLockedUntil     DateTime?
   roleId          String
   role            Role             @relation(fields: [roleId], references: [id])
   createdAt       DateTime         @default(now())
@@ -328,4 +364,27 @@ model IdempotencyKey {
 
   @@unique([scope, key])
   @@index([createdAt])
+}
+
+/// A manager's PIN approval of one sensitive action. The token is shown once; only its hash is
+/// stored. Single use, short lived, bound to one action and one requesting user.
+model Approval {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique
+  action      String
+  approverId  String
+  requesterId String
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([expiresAt])
+}
+
+/// Owner-editable shop settings (key/value). Known keys and defaults live in code.
+model StoreSetting {
+  key             String   @id
+  value           Json
+  updatedAt       DateTime @updatedAt
+  updatedByUserId String?
 }

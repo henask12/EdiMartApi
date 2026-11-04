@@ -7,13 +7,35 @@ import * as bcrypt from "bcryptjs";
 import { isOwnerRoleName, OWNER_ROLE } from "../common/role.constants";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { Actor, actorIsOwner, PermissionsService } from "../permissions/permissions.service";
+import { ForbiddenException } from "@nestjs/common";
 
 @Injectable()
 export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly permissions: PermissionsService,
   ) {}
+
+  /**
+   * Managing someone means being at least as powerful as them: an owner account can only be
+   * touched by an owner, and nobody can reset the password of (or edit) a user whose role grants
+   * more than their own.
+   */
+  private async assertCanManage(actor: Actor, target: { roleId: string; role: { name: string } }) {
+    if (actorIsOwner(actor)) {
+      return;
+    }
+    if (target.role.name === OWNER_ROLE) {
+      throw new ForbiddenException("Only an owner can change an owner account");
+    }
+    const role = await this.prisma.role.findUniqueOrThrow({
+      where: { id: target.roleId },
+      include: { permissions: true },
+    });
+    this.permissions.assertCanAssignRole(actor, role);
+  }
 
   findById(id: string) {
     return this.prisma.user.findUnique({
@@ -45,9 +67,10 @@ export class UsersService {
   }
 
   async create(
-    actorId: string,
+    actor: Actor,
     data: { email: string; displayName?: string; role: string; password: string },
   ) {
+    const actorId = actor.userId;
     const email = data.email.trim().toLowerCase();
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) {
@@ -55,10 +78,12 @@ export class UsersService {
     }
     const role = await this.prisma.role.findFirst({
       where: { name: data.role.trim().toUpperCase() },
+      include: { permissions: true },
     });
     if (!role) {
       throw new BadRequestException("Invalid role");
     }
+    this.permissions.assertCanAssignRole(actor, role);
     const passwordHash = await bcrypt.hash(data.password, 10);
     const user = await this.prisma.user.create({
       data: {
@@ -77,14 +102,16 @@ export class UsersService {
   }
 
   async update(
-    actorId: string,
+    actor: Actor,
     id: string,
     data: { displayName?: string; role?: string; roleId?: string; isActive?: boolean },
   ) {
+    const actorId = actor.userId;
     const user = await this.findById(id);
     if (!user) {
       throw new NotFoundException("User not found");
     }
+    await this.assertCanManage(actor, user);
     if (isOwnerRoleName(user.role.name)) {
       if (data.isActive === false) {
         throw new BadRequestException("Owner accounts cannot be deactivated");
@@ -101,18 +128,24 @@ export class UsersService {
     }
     let roleId = user.roleId;
     if (data.roleId) {
-      const role = await this.prisma.role.findUnique({ where: { id: data.roleId } });
-      if (!role) {
-        throw new BadRequestException("Invalid role");
-      }
-      roleId = role.id;
-    } else if (data.role) {
-      const role = await this.prisma.role.findFirst({
-        where: { name: data.role.trim().toUpperCase() },
+      const role = await this.prisma.role.findUnique({
+        where: { id: data.roleId },
+        include: { permissions: true },
       });
       if (!role) {
         throw new BadRequestException("Invalid role");
       }
+      this.permissions.assertCanAssignRole(actor, role);
+      roleId = role.id;
+    } else if (data.role) {
+      const role = await this.prisma.role.findFirst({
+        where: { name: data.role.trim().toUpperCase() },
+        include: { permissions: true },
+      });
+      if (!role) {
+        throw new BadRequestException("Invalid role");
+      }
+      this.permissions.assertCanAssignRole(actor, role);
       roleId = role.id;
     }
     const updated = await this.prisma.user.update({
@@ -128,11 +161,13 @@ export class UsersService {
     return this.sanitizeUser(updated);
   }
 
-  async resetPassword(actorId: string, id: string, password: string) {
+  async resetPassword(actor: Actor, id: string, password: string) {
+    const actorId = actor.userId;
     const user = await this.findById(id);
     if (!user) {
       throw new NotFoundException("User not found");
     }
+    await this.assertCanManage(actor, user);
     const passwordHash = await bcrypt.hash(password, 10);
     await this.prisma.user.update({
       where: { id },

@@ -7,16 +7,16 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { CASHIER_ROLE, OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import { memoryStorage } from "multer";
-import { Roles } from "../common/decorators/roles.decorator";
 import { UploadsService } from "./uploads.service";
+import { PermissionKey } from "@prisma/client";
+import { RequirePermissions, RequireAnyPermission } from "../common/decorators/permissions.decorator";
 
 @Controller("uploads")
 export class UploadsController {
   constructor(private readonly uploads: UploadsService) {}
 
-  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
+  @RequireAnyPermission(PermissionKey.PRODUCTS_CREATE, PermissionKey.PRODUCTS_EDIT)
   @Post("product-image")
   @UseInterceptors(
     FileInterceptor("file", {
@@ -31,7 +31,7 @@ export class UploadsController {
     return this.uploads.saveProductImage(file);
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.SALES_CREATE)
   @Post("sale-proof")
   @UseInterceptors(
     FileInterceptor("file", {

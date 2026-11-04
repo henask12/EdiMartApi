@@ -11,13 +11,15 @@ import {
   Res,
 } from "@nestjs/common";
 import { PaymentMethod } from "@prisma/client";
-import { CASHIER_ROLE, OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import type { Response } from "express";
 import { Type } from "class-transformer";
 import { IsArray, IsEnum, IsOptional, IsString, MaxLength, ValidateNested } from "class-validator";
-import { Roles } from "../common/decorators/roles.decorator";
 import { parseExportFormat, sendExport } from "../export/export-response.util";
 import { SalesService } from "./sales.service";
+import { viewerFor } from "../permissions/access";
+import type { Actor } from "../permissions/permissions.service";
+import { PermissionKey } from "@prisma/client";
+import { RequirePermissions, RequireAnyPermission } from "../common/decorators/permissions.decorator";
 
 class CheckoutLineDto {
   @IsString()
@@ -53,15 +55,16 @@ class CheckoutDto {
   paymentReference?: string;
 }
 
-type Authed = { user: { userId: string } };
+type Authed = { user: Actor };
 
 @Controller("sales")
 export class SalesController {
   constructor(private readonly sales: SalesService) {}
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.SALES_EXPORT)
   @Get("export")
   async export(
+    @Req() req: Authed,
     @Res() res: Response,
     @Query("format") format?: string,
     @Query("from") from?: string,
@@ -69,18 +72,18 @@ export class SalesController {
     @Query("productId") productId?: string,
     @Query("categoryId") categoryId?: string,
   ) {
-    const result = await this.sales.exportSales(parseExportFormat(format), {
-      from,
-      to,
-      productId,
-      categoryId,
-    });
+    const result = await this.sales.exportSales(
+      parseExportFormat(format),
+      { from, to, productId, categoryId },
+      viewerFor(req.user),
+    );
     sendExport(res, result);
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @RequireAnyPermission(PermissionKey.SALES_VIEW, PermissionKey.SALES_VIEW_OWN, PermissionKey.SALES_VIEW_ALL)
   @Get()
   list(
+    @Req() req: Authed,
     @Query("skip") skip?: string,
     @Query("take") take?: string,
     @Query("from") from?: string,
@@ -88,29 +91,32 @@ export class SalesController {
     @Query("productId") productId?: string,
     @Query("categoryId") categoryId?: string,
   ) {
-    return this.sales.listSales({
-      skip: skip ? Number(skip) : undefined,
-      take: take ? Number(take) : undefined,
-      from,
-      to,
-      productId,
-      categoryId,
-    });
+    return this.sales.listSales(
+      {
+        skip: skip ? Number(skip) : undefined,
+        take: take ? Number(take) : undefined,
+        from,
+        to,
+        productId,
+        categoryId,
+      },
+      viewerFor(req.user),
+    );
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.REPORTING_VIEW)
   @Get("today-summary")
-  todaySummary() {
-    return this.sales.todaySummary();
+  todaySummary(@Req() req: Authed) {
+    return this.sales.todaySummary(viewerFor(req.user).includeCost);
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @RequireAnyPermission(PermissionKey.SALES_VIEW, PermissionKey.SALES_VIEW_OWN, PermissionKey.SALES_VIEW_ALL)
   @Get(":id")
-  get(@Param("id") id: string) {
-    return this.sales.getSale(id);
+  get(@Req() req: Authed, @Param("id") id: string) {
+    return this.sales.getSale(id, viewerFor(req.user));
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.SALES_CREATE)
   @Post("checkout")
   checkout(
     @Req() req: Authed,
@@ -121,6 +127,6 @@ export class SalesController {
     if (!key || key.length < 8 || key.length > 128) {
       throw new BadRequestException("Idempotency-Key header is required (8-128 characters)");
     }
-    return this.sales.checkout(req.user.userId, body, key);
+    return this.sales.checkout(req.user.userId, body, key, viewerFor(req.user));
   }
 }

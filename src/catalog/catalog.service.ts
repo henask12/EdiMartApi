@@ -11,6 +11,7 @@ import { InventoryService } from "../inventory/inventory.service";
 import { productStockSnapshot } from "../common/stock.util";
 import { ExportService, type ExportColumn } from "../export/export.service";
 import { StorageService } from "../storage/storage.service";
+import { omit } from "../permissions/access";
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
 
@@ -40,14 +41,18 @@ const productInclude = {
 
 type ProductWithRelations = Prisma.ProductGetPayload<{ include: typeof productInclude }>;
 
-type EnrichedProduct = Omit<ProductWithRelations, "sellingPrice" | "costPrice"> & {
+type EnrichedProduct = Omit<ProductWithRelations, "sellingPrice" | "costPrice" | "inventoryItems"> & {
+  inventoryItems: (Omit<ProductWithRelations["inventoryItems"][number], "averageCost"> & {
+    averageCost?: Prisma.Decimal;
+  })[];
   imageUrl: string | null;
   onHand: string;
   reserved: string;
   available: string;
   stockStatus: StockStatus;
   sellingPrice: string;
-  costPrice: string;
+  /** Only present for people allowed to see costs (REPORTS_VIEW_COST_PROFIT). */
+  costPrice?: string;
 };
 
 const normalizeStockStatus = (value?: string): StockStatus | undefined => {
@@ -83,6 +88,7 @@ export class CatalogService {
   private async enrichProduct(
     product: ProductWithRelations,
     locationId: string,
+    includeCost: boolean,
   ): Promise<EnrichedProduct> {
     const { onHand, reserved, available } = await productStockSnapshot(
       this.prisma,
@@ -91,14 +97,19 @@ export class CatalogService {
     );
     const imageUrl = await this.storage.publicUrl(product.imagePath);
     return {
-      ...product,
+      // the raw row carries costPrice; it is added back below only for people allowed to see it
+      ...omit(product, "costPrice"),
+      // the average cost of each stock row is as secret as the product's cost price
+      inventoryItems: includeCost
+        ? product.inventoryItems
+        : product.inventoryItems.map((item) => omit(item, "averageCost")),
       imageUrl,
       onHand: onHand.toString(),
       reserved: reserved.toString(),
       available: available.toString(),
       stockStatus: this.stockStatus(available, product.restockAt),
       sellingPrice: product.sellingPrice.toFixed(2),
-      costPrice: product.costPrice.toFixed(2),
+      ...(includeCost ? { costPrice: product.costPrice.toFixed(2) } : {}),
     };
   }
 
@@ -123,14 +134,17 @@ export class CatalogService {
     return where;
   }
 
-  async listProducts(params: {
+  async listProducts(
+    params: {
     q?: string;
     categoryId?: string;
     productTypeId?: string;
-    stockStatus?: string;
-    skip?: number;
-    take?: number;
-  }) {
+      stockStatus?: string;
+      skip?: number;
+      take?: number;
+    },
+    includeCost = false,
+  ) {
     const take = Math.min(params.take ?? 100, 200);
     const skip = params.skip ?? 0;
     const where = this.buildWhere(params);
@@ -143,7 +157,9 @@ export class CatalogService {
         orderBy: { name: "asc" },
         include: productInclude,
       });
-      const enriched = await Promise.all(raw.map((p) => this.enrichProduct(p, defaultLoc.id)));
+      const enriched = await Promise.all(
+        raw.map((p) => this.enrichProduct(p, defaultLoc.id, includeCost)),
+      );
       const filtered = enriched.filter((p) => p.stockStatus === stockFilter);
       const total = filtered.length;
       const items = filtered.slice(skip, skip + take);
@@ -161,7 +177,7 @@ export class CatalogService {
       this.prisma.product.count({ where }),
     ]);
     const items = await Promise.all(
-      raw.map((p) => this.enrichProduct(p, defaultLoc.id)),
+      raw.map((p) => this.enrichProduct(p, defaultLoc.id, includeCost)),
     );
     return { items, total, skip, take };
   }
@@ -174,12 +190,16 @@ export class CatalogService {
       productTypeId?: string;
       stockStatus?: string;
     },
+    includeCost = false,
   ) {
-    const { items } = await this.listProducts({
-      ...params,
-      skip: 0,
-      take: 10000,
-    });
+    const { items } = await this.listProducts(
+      {
+        ...params,
+        skip: 0,
+        take: 10000,
+      },
+      includeCost,
+    );
     const columns: ExportColumn[] = [
       { header: "SKU", key: "sku" },
       { header: "Name", key: "name" },
@@ -188,7 +208,7 @@ export class CatalogService {
       { header: "On hand", key: "onHand" },
       { header: "Available", key: "available" },
       { header: "Status", key: "status" },
-      { header: "Cost", key: "cost" },
+      ...(includeCost ? [{ header: "Cost", key: "cost" }] : []),
       { header: "Price", key: "price" },
     ];
     const rows = items.map((p) => ({
@@ -199,13 +219,13 @@ export class CatalogService {
       onHand: p.onHand,
       available: p.available,
       status: p.stockStatus,
-      cost: p.costPrice,
+      ...(includeCost ? { cost: p.costPrice } : {}),
       price: p.sellingPrice,
     }));
     return this.exportService.build(format, `products-${Date.now()}`, columns, rows);
   }
 
-  async getProduct(id: string): Promise<EnrichedProduct> {
+  async getProduct(id: string, includeCost = false): Promise<EnrichedProduct> {
     const product = await this.prisma.product.findUnique({
       where: { id },
       include: productInclude,
@@ -214,7 +234,7 @@ export class CatalogService {
       throw new NotFoundException("Product not found");
     }
     const defaultLoc = await this.locations.getDefault();
-    return this.enrichProduct(product, defaultLoc.id);
+    return this.enrichProduct(product, defaultLoc.id, includeCost);
   }
 
   async createProduct(
@@ -234,6 +254,7 @@ export class CatalogService {
       initialExpiryDate?: string;
       expiryDate?: string;
     },
+    includeCost = false,
   ) {
     const name = data.name.trim();
     if (!name) {
@@ -298,7 +319,7 @@ export class CatalogService {
       });
     }
 
-    return this.getProduct(product.id);
+    return this.getProduct(product.id, includeCost);
   }
 
   async updateProduct(
@@ -318,6 +339,7 @@ export class CatalogService {
       originCountry: string | null;
       expiryDate: string | null;
     }>,
+    includeCost = false,
   ) {
     const existing = await this.ensureProduct(id);
     if (data.productTypeId) {
@@ -372,7 +394,7 @@ export class CatalogService {
       data: updateData,
     });
     await this.audit.log(userId, "UPDATE", "Product", id, { name: data.name });
-    return this.getProduct(id);
+    return this.getProduct(id, includeCost);
   }
 
   private async ensureProduct(id: string) {

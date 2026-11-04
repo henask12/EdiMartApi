@@ -28,6 +28,7 @@ import {
   productStockSnapshot,
 } from "../common/stock.util";
 import { ExportService, type ExportColumn } from "../export/export.service";
+import type { Viewer } from "../permissions/access";
 
 const toDecimal = (value: string | number) => {
   try {
@@ -108,6 +109,7 @@ export class SalesService {
         payments: true;
       };
     }>,
+    includeCost: boolean,
   ) {
     const { lines, attachments, payments, grandTotal, subtotal, ...rest } = sale;
     return {
@@ -129,8 +131,8 @@ export class SalesService {
           quantity: qty.toString(),
           unitPrice: l.unitPrice.toFixed(2),
           lineTotal: l.lineTotal.toFixed(2),
-          unitCostAtSale: unitCost,
-          netProfit,
+          // what an item cost and what the sale earned are only for people allowed to see them
+          ...(includeCost ? { unitCostAtSale: unitCost, netProfit } : {}),
           product: {
             id: l.product.id,
             name: l.product.name,
@@ -182,10 +184,14 @@ export class SalesService {
     to?: string;
     productId?: string;
     categoryId?: string;
-  }) {
+  }, viewer: Viewer) {
     const take = Math.min(params.take ?? 50, 200);
     const skip = params.skip ?? 0;
     const where = this.buildSalesWhere(params);
+    if (!viewer.viewAllSales) {
+      // without "view all sales" a person only ever sees the sales they recorded themselves
+      where.createdByUserId = viewer.userId;
+    }
     const [items, total] = await Promise.all([
       this.prisma.sale.findMany({
         where,
@@ -202,14 +208,14 @@ export class SalesService {
       this.prisma.sale.count({ where }),
     ]);
     return {
-      items: await Promise.all(items.map((s) => this.mapSale(s))),
+      items: await Promise.all(items.map((s) => this.mapSale(s, viewer.includeCost))),
       total,
       skip,
       take,
     };
   }
 
-  async getSale(id: string) {
+  async getSale(id: string, viewer: Viewer) {
     const sale = await this.prisma.sale.findUnique({
       where: { id },
       include: {
@@ -219,17 +225,19 @@ export class SalesService {
         payments: true,
       },
     });
-    if (!sale) {
+    if (!sale || (!viewer.viewAllSales && sale.createdByUserId !== viewer.userId)) {
+      // someone else's sale looks exactly like a sale that does not exist
       throw new NotFoundException("Sale not found");
     }
-    return this.mapSale(sale);
+    return this.mapSale(sale, viewer.includeCost);
   }
 
   async exportSales(
     format: "csv" | "xlsx" | "pdf",
     params: { from?: string; to?: string; productId?: string; categoryId?: string },
+    viewer: Viewer,
   ) {
-    const { items } = await this.listSales({ ...params, skip: 0, take: 5000 });
+    const { items } = await this.listSales({ ...params, skip: 0, take: 5000 }, viewer);
     const columns: ExportColumn[] = [
       { header: "Sales date", key: "date" },
       { header: "Item", key: "product" },
@@ -239,7 +247,7 @@ export class SalesService {
       { header: "Unit price", key: "unitPrice" },
       { header: "Quantity", key: "quantity" },
       { header: "Total price", key: "lineTotal" },
-      { header: "Net profit", key: "netProfit" },
+      ...(viewer.includeCost ? [{ header: "Net profit", key: "netProfit" }] : []),
       { header: "Sale #", key: "saleNumber" },
     ];
     const rows: Record<string, string>[] = [];
@@ -255,7 +263,7 @@ export class SalesService {
           quantity: l.quantity,
           unitPrice: l.unitPrice,
           lineTotal: l.lineTotal,
-          netProfit: l.netProfit,
+          ...(viewer.includeCost && "netProfit" in l ? { netProfit: l.netProfit } : {}),
           saleNumber: s.saleNumber,
           cashier,
           payment,
@@ -273,7 +281,7 @@ export class SalesService {
    * failures are retried up to three times. `idempotencyKey` makes the call safe to repeat: the
    * same key with the same request returns the original sale instead of selling twice.
    */
-  async checkout(userId: string, input: CheckoutInput, idempotencyKey: string) {
+  async checkout(userId: string, input: CheckoutInput, idempotencyKey: string, viewer: Viewer) {
     if (!input.lines?.length) {
       throw new BadRequestException("Add at least one product");
     }
@@ -315,7 +323,8 @@ export class SalesService {
       throw new ConflictException("The shop is busy right now, please try again");
     }
 
-    const sale = await this.getSale(outcome.saleId);
+    // the sale just recorded is the caller's own, so it can always be shown to them
+    const sale = await this.getSale(outcome.saleId, { ...viewer, viewAllSales: true });
     if (!outcome.replayed) {
       // The sale is already committed; an alert failure must never turn it into an error.
       const productIds = [...new Set(input.lines.map((l) => l.productId))];
@@ -634,11 +643,11 @@ export class SalesService {
     return `SALE-${date.replace(/-/g, "")}-${String(rows[0].value).padStart(4, "0")}`;
   }
 
-  async todaySummary() {
-    return this.salesInRange(this.dayBounds(new Date()));
+  async todaySummary(includeCost = false) {
+    return this.salesInRange(this.dayBounds(new Date()), includeCost);
   }
 
-  async salesInRange(range: { start: Date; end: Date; label: string }) {
+  async salesInRange(range: { start: Date; end: Date; label: string }, includeCost = false) {
     const sales = await this.prisma.sale.findMany({
       where: { createdAt: { gte: range.start, lt: range.end } },
       include: { lines: { include: { product: true } } },
@@ -675,25 +684,25 @@ export class SalesService {
       end: range.end.toISOString(),
       saleCount: sales.length,
       grandTotal: total.toFixed(2),
-      netProfit: netProfitTotal.toFixed(2),
+      ...(includeCost ? { netProfit: netProfitTotal.toFixed(2) } : {}),
       topProducts,
     };
   }
 
-  salesForPeriod(period: "day" | "week" | "month" | "year", anchor?: string) {
+  salesForPeriod(period: "day" | "week" | "month" | "year", anchor?: string, includeCost = false) {
     const base = anchor ? new Date(anchor) : new Date();
     if (Number.isNaN(base.getTime())) {
       throw new BadRequestException("Invalid date");
     }
     switch (period) {
       case "day":
-        return this.salesInRange(this.dayBounds(base));
+        return this.salesInRange(this.dayBounds(base), includeCost);
       case "week":
-        return this.salesInRange(this.weekBounds(base));
+        return this.salesInRange(this.weekBounds(base), includeCost);
       case "month":
-        return this.salesInRange(this.monthBounds(base));
+        return this.salesInRange(this.monthBounds(base), includeCost);
       case "year":
-        return this.salesInRange(this.yearBounds(base));
+        return this.salesInRange(this.yearBounds(base), includeCost);
       default:
         throw new BadRequestException("Invalid period");
     }

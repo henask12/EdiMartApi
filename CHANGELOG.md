@@ -1,5 +1,57 @@
 # Changelog
 
+## Phase 1 - one permission model
+
+### Changed (contract)
+- **Every route is guarded by permissions.** `@Roles(...)` and the `RolesGuard` are gone; only the
+  OWNER role bypasses checks. Every route must declare `@RequirePermissions`, `@RequireAnyPermission`,
+  `@AnyAuthenticated` or `@Public`; the API refuses to start if one does not.
+  See [docs/PERMISSIONS.md](docs/PERMISSIONS.md) for the full route-to-permission mapping.
+- **Roles hold exactly what is stored.** The silent fallback to code defaults is removed.
+- **Cost and profit are hidden in API responses** unless the role has `REPORTS_VIEW_COST_PROFIT`
+  (product cost, average cost, sale cost and net profit, dashboard profit and stock value, movement and
+  batch unit costs, export columns). Changing a product's cost price needs the same permission.
+  **After this phase only the owner sees cost and profit until a role is given the permission.**
+- **Sales lists are scoped**: without `SALES_VIEW_ALL` a person sees only the sales they recorded.
+- `/inventory/adjust` and `/inventory/return` need `STOCK_ADJUST`; `/inventory/expiry` needs
+  `STOCK_VIEW`; creating a reservation needs `PRODUCTS_RESERVE`, completing one needs
+  `RESERVATIONS_MANAGE` and `SALES_CREATE`; alert e-mails need `SETTINGS_EMAILS`; product photo
+  uploads need `PRODUCTS_CREATE` or `PRODUCTS_EDIT`; deleting categories and product types needs the
+  matching `*_MANAGE` key (it was owner-only).
+
+### Added
+- 31 permissions (sales scope, discounts, voids/refunds, price override, cash drawer, shifts, customers,
+  purchasing, stock view/count/adjust/transfer/write-off, prices, locations, labels, cost/profit,
+  exports, shop settings, audit log). Many are "planned": defined now, enforced in later phases.
+- Permission catalog with labels, descriptions and sensitivity (`GET /roles/permissions`).
+- **Manager approval PIN**: `PUT /auth/pin`, `GET /approvals/managers`, `POST /approvals`, single-use
+  tokens (`X-Approval-Token`), lockout after 5 wrong tries. Used for stock corrections above the limit.
+- Shop settings (`GET/PATCH /settings/store`): the adjustment approval limit (default Br 5,000).
+- No-escalation rules: nobody can grant a permission they lack, edit their own role, create or assign
+  an owner, or edit/reset a user whose role is stronger than theirs.
+- `/auth/me` returns `hasPin`.
+
+### Fixed
+- Anyone allowed to manage users could create an owner account or reset the owner's password.
+- Reservation responses embedded the product including its cost price.
+- Stock-change responses (receive/adjust/return) returned the raw stock row including average cost.
+- Stock-movement and batch responses embedded raw products and stock rows with cost fields.
+
+### Database (additive)
+- `20251105000000_phase1_permission_keys`: the new enum values (own migration: PostgreSQL cannot use a
+  new enum value in the transaction that adds it).
+- `20251105000100_phase1_permissions_backfill`: `User.pinHash/pinFailedAttempts/pinLockedUntil`,
+  `Approval`, `StoreSetting`, and the backfill (defaults written out as rows for built-in roles with
+  none; `SALES_VIEW_ALL` for `SALES_VIEW`, `STOCK_VIEW` for `STOCK_HISTORY_VIEW`; no sensitive key is
+  ever granted).
+
+### Behaviour changes to know about
+- Cashiers and store staff no longer see cost and profit (sales page, dashboard, product cost, exports).
+- Cashiers lose manual stock returns (`/inventory/return`, no screen used it). Store staff lose manual
+  adjustments (`/inventory/adjust`, no screen used it). Both can be granted `STOCK_ADJUST`.
+- `/inventory/expiry` follows `STOCK_VIEW`, which roles get from `STOCK_HISTORY_VIEW` (cashiers had
+  API access to expiry by role name but never had the menu link).
+
 ## Phase 0 - correct and safe
 
 ### Fixed

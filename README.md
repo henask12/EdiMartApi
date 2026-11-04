@@ -31,6 +31,13 @@ npm run typecheck
 3. Sign in; you are asked to choose a new password straight away.
 4. Set `SETUP_ENABLED=0` (or remove it) and redeploy. The setup routes then answer 404.
 
+### Permissions
+
+Every route is guarded by permissions; roles are bundles of permissions and only the owner bypasses
+checks. See [docs/PERMISSIONS.md](docs/PERMISSIONS.md) for the model, cost/profit visibility, manager
+PIN approvals and a checklist for adding a route. The API will not start if a route declares no
+permission.
+
 ### Checkout contract
 
 `POST /sales/checkout` needs an `Idempotency-Key` header (8-128 characters, one per sale attempt;

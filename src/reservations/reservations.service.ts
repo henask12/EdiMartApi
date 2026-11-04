@@ -12,6 +12,14 @@ import { AuditService } from "../audit/audit.service";
 import { lockInventoryRows, productStockSnapshot } from "../common/stock.util";
 import { BUSINESS_TZ } from "../common/business-time";
 import { SalesService } from "../sales/sales.service";
+import { omit, viewerFor } from "../permissions/access";
+import type { Actor } from "../permissions/permissions.service";
+
+/** Reservations embed their product; cost price is never part of that (it is not needed here). */
+const noProductCost = <T extends { product: { costPrice: unknown } }>(r: T) => ({
+  ...r,
+  product: omit(r.product, "costPrice"),
+});
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
 
@@ -51,7 +59,7 @@ export class ReservationsService {
       }),
       this.prisma.reservation.count({ where }),
     ]);
-    return { items, total, skip, take };
+    return { items: items.map(noProductCost), total, skip, take };
   }
 
   async create(
@@ -122,7 +130,7 @@ export class ReservationsService {
       productId: data.productId,
       quantity: data.quantity,
     });
-    return reservation;
+    return noProductCost(reservation);
   }
 
   async cancel(userId: string, id: string) {
@@ -185,7 +193,7 @@ export class ReservationsService {
     });
 
     await this.audit.log(userId, "CANCEL_RESERVE", "Reservation", id);
-    return updated;
+    return noProductCost(updated);
   }
 
   async update(
@@ -239,7 +247,7 @@ export class ReservationsService {
 
     const qtyDelta = newQty.sub(oldQty);
     if (qtyDelta.eq(0) && customerName === reservation.customerName) {
-      return reservation;
+      return noProductCost(reservation);
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -308,10 +316,11 @@ export class ReservationsService {
       quantity: newQty.toString(),
       customerName,
     });
-    return updated;
+    return noProductCost(updated);
   }
 
-  async completeAsSale(userId: string, id: string) {
+  async completeAsSale(actor: Actor, id: string) {
+    const userId = actor.userId;
     const reservation = await this.prisma.reservation.findUnique({
       where: { id },
     });
@@ -335,6 +344,7 @@ export class ReservationsService {
         notes: `Reservation ${id}`,
       },
       `reservation-complete:${id}`,
+      viewerFor(actor),
     );
 
     await this.audit.log(userId, "COMPLETE_RESERVE", "Reservation", id, {

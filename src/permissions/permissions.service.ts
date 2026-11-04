@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -8,10 +9,16 @@ import { CASHIER_ROLE, isOwnerRoleName, OWNER_ROLE } from "../common/role.consta
 import { ALL_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from "./role-defaults";
 import { PrismaService } from "../prisma/prisma.service";
 
+/** The signed-in person doing a role or user change. */
+export type Actor = { userId: string; roleName: string; permissions: PermissionKey[] };
+
+export const actorIsOwner = (actor: Pick<Actor, "roleName">) => isOwnerRoleName(actor.roleName);
+
 @Injectable()
 export class PermissionsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Exactly the permissions stored for the role; only the owner role is automatic. */
   async getPermissionsForRole(roleName: string): Promise<PermissionKey[]> {
     if (isOwnerRoleName(roleName)) {
       return ALL_PERMISSIONS;
@@ -20,13 +27,41 @@ export class PermissionsService {
       where: { name: roleName },
       include: { permissions: true },
     });
-    if (!role) {
-      return DEFAULT_ROLE_PERMISSIONS[roleName] ?? [];
+    return role ? role.permissions.map((p) => p.permission) : [];
+  }
+
+  /**
+   * Nobody can hand out more than they hold: without this, anyone allowed to edit roles could give
+   * themselves (or a friend) any permission, including cost/profit and stock corrections. The owner
+   * is exempt, and nobody but the owner may edit their own role.
+   */
+  assertCanGrant(actor: Actor, granting: PermissionKey[], targetRoleName?: string) {
+    if (actorIsOwner(actor)) {
+      return;
     }
-    if (role.permissions.length === 0) {
-      return DEFAULT_ROLE_PERMISSIONS[roleName] ?? [];
+    if (targetRoleName && targetRoleName === actor.roleName) {
+      throw new ForbiddenException("You cannot change the permissions of your own role");
     }
-    return role.permissions.map((p) => p.permission);
+    const missing = granting.filter((p) => !actor.permissions.includes(p));
+    if (missing.length > 0) {
+      throw new ForbiddenException(
+        `You can only grant permissions you have yourself (missing: ${missing.join(", ")})`,
+      );
+    }
+  }
+
+  /** May this actor put a user into this role? (the owner role is only for the owner) */
+  assertCanAssignRole(actor: Actor, role: { name: string; permissions: { permission: PermissionKey }[] }) {
+    if (actorIsOwner(actor)) {
+      return;
+    }
+    if (isOwnerRoleName(role.name)) {
+      throw new ForbiddenException("Only an owner can assign the owner role");
+    }
+    this.assertCanGrant(
+      actor,
+      role.permissions.map((p) => p.permission),
+    );
   }
 
   listRolesWithPermissions() {
@@ -71,7 +106,7 @@ export class PermissionsService {
     };
   }
 
-  async createRole(name: string, permissions?: PermissionKey[]) {
+  async createRole(actor: Actor, name: string, permissions?: PermissionKey[]) {
     const trimmed = name.trim().toUpperCase().replace(/\s+/g, "_");
     if (!trimmed || trimmed.length < 2) {
       throw new BadRequestException("Role name is required");
@@ -85,7 +120,11 @@ export class PermissionsService {
     }
     const perms = permissions?.length
       ? [...new Set(permissions)]
-      : DEFAULT_ROLE_PERMISSIONS[CASHIER_ROLE] ?? [];
+      : (DEFAULT_ROLE_PERMISSIONS[CASHIER_ROLE] ?? []).filter(
+          // a new role starts with what the owner could hand over, never more than the creator has
+          (p) => actorIsOwner(actor) || actor.permissions.includes(p),
+        );
+    this.assertCanGrant(actor, perms);
     const role = await this.prisma.role.create({
       data: {
         name: trimmed,
@@ -103,6 +142,7 @@ export class PermissionsService {
   }
 
   async updateRole(
+    actor: Actor,
     id: string,
     data: { name?: string; permissions?: PermissionKey[] },
   ) {
@@ -136,6 +176,12 @@ export class PermissionsService {
       if (invalid.length > 0) {
         throw new BadRequestException("Invalid permission");
       }
+      const before = new Set(role.permissions.map((p) => p.permission));
+      this.assertCanGrant(
+        actor,
+        unique.filter((p) => !before.has(p)),
+        role.name,
+      );
       await this.prisma.$transaction(async (tx) => {
         await tx.rolePermission.deleteMany({ where: { roleId: id } });
         if (unique.length > 0) {
@@ -154,14 +200,6 @@ export class PermissionsService {
       },
     });
     return this.mapRole(updated);
-  }
-
-  async updateRolePermissionsByName(roleName: string, permissions: PermissionKey[]) {
-    const role = await this.prisma.role.findUnique({ where: { name: roleName } });
-    if (!role) {
-      throw new NotFoundException("Role not found");
-    }
-    return this.updateRole(role.id, { permissions });
   }
 
   async deleteRole(id: string) {

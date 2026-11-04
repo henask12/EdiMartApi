@@ -8,6 +8,7 @@ import {
   STORE_STAFF_ROLE,
 } from "../common/role.constants";
 import { CATALOG_CATEGORIES, CATALOG_PRODUCTS } from "./catalog-seed-data";
+import { DEFAULT_ROLE_PERMISSIONS } from "../permissions/role-defaults";
 
 /** Thrown when the database already holds real data; the seed only ever runs on an empty one. */
 export class SeedRefusedError extends Error {}
@@ -70,6 +71,19 @@ export const runSeed = async (prisma: PrismaClient, options: SeedOptions = {}) =
     ),
   );
   const roleByName = (n: string) => roles.find((r) => r.name === n)!;
+
+  // A role has exactly the permissions stored for it (the owner role is the only automatic one),
+  // so write the built-in roles' starting permissions out as real rows.
+  for (const role of roles) {
+    if (role.name === OWNER_ROLE) continue;
+    await prisma.rolePermission.createMany({
+      data: (DEFAULT_ROLE_PERMISSIONS[role.name] ?? []).map((permission) => ({
+        roleId: role.id,
+        permission,
+      })),
+      skipDuplicates: true,
+    });
+  }
 
   const defaultLoc = await prisma.location.upsert({
     where: { code: "DEFAULT_STORE" },

@@ -19,10 +19,11 @@ import { LocationsModule } from "./locations/locations.module";
 import { HealthModule } from "./health/health.module";
 import { AppController } from "./app.controller";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
-import { RolesGuard } from "./common/guards/roles.guard";
 import { PermissionsGuard } from "./common/guards/permissions.guard";
 import { MustChangePasswordGuard } from "./common/guards/must-change-password.guard";
 import { StorageModule } from "./storage/storage.module";
+import { ApprovalsModule } from "./approvals/approvals.module";
+import { StoreSettingsModule } from "./settings/store-settings.module";
 import { SetupModule } from "./setup/setup.module";
 import { isSetupEnabled } from "./setup/setup.config";
 import { PermissionsModule } from "./permissions/permissions.module";
@@ -37,6 +38,8 @@ import { PermissionsModule } from "./permissions/permissions.module";
     PrismaModule,
     StorageModule,
     PermissionsModule,
+    ApprovalsModule,
+    StoreSettingsModule,
     AuditModule,
     UsersModule,
     AuthModule,
@@ -58,7 +61,6 @@ import { PermissionsModule } from "./permissions/permissions.module";
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: MustChangePasswordGuard },
-    { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
