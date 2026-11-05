@@ -34,6 +34,6 @@ import { ReorderService } from "./reorder.service";
     SupplierReturnsService,
     ReorderService,
   ],
-  exports: [PurchaseOrdersService, SuppliersService, ReorderService],
+  exports: [PurchaseOrdersService, SuppliersService, ReorderService, BillsService],
 })
 export class PurchasingModule {}

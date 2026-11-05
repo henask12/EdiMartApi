@@ -286,6 +286,7 @@ model Product {
   supplierCostHistory SupplierCostHistory[]
   supplierReturnLines SupplierReturnLine[]
   promotions          Promotion[]
+  dailyProductSales   DailyProductSales[]
 
   @@unique([categoryId, name])
   @@index([expiryDate])
@@ -1308,4 +1309,48 @@ model PromotionUsage {
   @@index([promotionId])
   @@index([saleId])
   @@index([customerId])
+}
+
+// ─── Phase 8: report summaries ───────────────────────────────────────────────
+
+/// One row per business calendar day (Africa/Addis_Ababa). Cost fields are always stored;
+/// API omits them unless the viewer has REPORTS_VIEW_COST_PROFIT.
+model DailySalesSummary {
+  id              String   @id @default(cuid())
+  /// YYYY-MM-DD in business TZ.
+  businessDate    String   @unique
+  saleCount       Int      @default(0)
+  voidCount       Int      @default(0)
+  returnCount     Int      @default(0)
+  subtotal        Decimal  @db.Decimal(14, 2) @default(0)
+  discountTotal   Decimal  @db.Decimal(14, 2) @default(0)
+  taxTotal        Decimal  @db.Decimal(14, 2) @default(0)
+  grandTotal      Decimal  @db.Decimal(14, 2) @default(0)
+  costTotal       Decimal  @db.Decimal(14, 2) @default(0)
+  /// JSON map of PaymentMethod → amount string.
+  paymentsByMethod Json    @default("{}")
+  /// JSON array of 24 hourly grandTotal strings (business hours 0–23).
+  salesByHour     Json     @default("[]")
+  rebuiltAt       DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([businessDate])
+}
+
+/// Per-product daily sales rollup for top products / ABC / turnover.
+model DailyProductSales {
+  id           String  @id @default(cuid())
+  businessDate String
+  productId    String
+  product      Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity     Decimal @db.Decimal(18, 4) @default(0)
+  revenue      Decimal @db.Decimal(14, 2) @default(0)
+  cost         Decimal @db.Decimal(14, 2) @default(0)
+  lineCount    Int     @default(0)
+  rebuiltAt    DateTime @default(now())
+
+  @@unique([businessDate, productId])
+  @@index([businessDate])
+  @@index([productId, businessDate])
 }

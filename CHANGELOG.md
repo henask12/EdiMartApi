@@ -1,5 +1,36 @@
 # Changelog
 
+## Phase 8 — Dashboards and reports (API)
+
+### Added
+- **Daily summaries**: `DailySalesSummary` / `DailyProductSales` (migration
+  `20261105080000_phase8_reports`). `SummaryRebuildService` rebuilds a business
+  day from Sale / SaleLine / PaymentAllocation / CreditNote; cron at 00:15
+  Africa/Addis_Ababa rebuilds yesterday + today. Admin catch-up:
+  `POST /reporting/rebuild-summaries` (`SETTINGS_MANAGE` or `REPORTING_VIEW`).
+- **Business dashboard** `GET /reporting/dashboard?preset=&from=&to=`: period +
+  comparison KPIs (sales, transactions, avgBasket; profit/margin when
+  `REPORTS_VIEW_COST_PROFIT`), sales-by-hour, paymentsByMethod, topProducts,
+  needsAttention (low/out stock, expiry, overdue POs/reservations/credit, cash
+  variance). Legacy today/week/month/year fields kept.
+- **Inventory dashboard** `GET /reporting/inventory-dashboard`: stock values,
+  low/out counts, dead stock, turnover/DOI, ABC counts, shrinkage this month.
+- **Sales reports**: sales-by-day/hour/product/cashier/payment,
+  discounts-voids-refunds, customers, vat-summary, shift-variances.
+- **Inventory reports**: stock-on-hand, valuation, movements, abc, turnover,
+  dead-stock, overstock, shrinkage, expiry-losses, margin-alerts (cost-gated).
+- **Purchasing reports**: purchases-by-supplier, open-pos, aged-payables,
+  landed-cost.
+- **CSV export**: `?format=csv` on key reports, or
+  `GET /reporting/export/:reportKey.csv`.
+- Date presets: today, yesterday, this_week, this_month, last_month, custom
+  (`src/reporting/date-range.ts`). Permission remains `REPORTING_VIEW`.
+
+### Database (additive only)
+- Migration `20261105080000_phase8_reports`: DailySalesSummary,
+  DailyProductSales; indexes on Sale(status,createdAt),
+  StockMovement(type,createdAt), PaymentAllocation(method,createdAt).
+
 ## Phase 7 — Customers, loyalty and promotions (API)
 
 ### Added

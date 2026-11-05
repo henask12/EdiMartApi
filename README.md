@@ -57,6 +57,21 @@ reuse it only to retry the *same* sale). Body: `lines[]`, optional `paymentMetho
 - Settings: `loyalty.pointsPerBirr`, `loyalty.birrPerRedeemPoint`, `loyalty.enabled`,
   `customers.defaultCreditLimit`.
 
+### Phase 8 — Dashboards and reports
+
+All under `/reporting` with `REPORTING_VIEW` (cost/profit fields need
+`REPORTS_VIEW_COST_PROFIT`). Date presets: `today` | `yesterday` | `this_week` |
+`this_month` | `last_month` | `custom` (`from`/`to` as YYYY-MM-DD, Africa/Addis_Ababa).
+
+- Dashboards: `GET /reporting/dashboard`, `GET /reporting/inventory-dashboard`.
+- Rebuild: `POST /reporting/rebuild-summaries` (`SETTINGS_MANAGE` or `REPORTING_VIEW`).
+- Sales: `sales-by-day|hour|product|cashier|payment`, `discounts-voids-refunds`,
+  `customers`, `vat-summary`, `shift-variances` (plus legacy `GET /reporting/sales`).
+- Inventory: `stock-on-hand`, `valuation`, `movements`, `abc`, `turnover`,
+  `dead-stock`, `overstock`, `shrinkage`, `expiry-losses`, `margin-alerts`.
+- Purchasing: `purchases-by-supplier`, `open-pos`, `aged-payables`, `landed-cost`.
+- CSV: add `?format=csv` on key reports, or `GET /reporting/export/:reportKey.csv`.
+
 ### Files
 
 Product photos are public; payment proofs are private and only reachable through short-lived
