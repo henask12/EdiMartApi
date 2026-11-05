@@ -42,8 +42,20 @@ permission.
 
 `POST /sales/checkout` needs an `Idempotency-Key` header (8-128 characters, one per sale attempt;
 reuse it only to retry the *same* sale). Body: `lines[]`, optional `paymentMethod`
-(`CASH` default, `TELEBIRR`, `CBE_BIRR`, `MPESA`, `BANK_TRANSFER`, `CARD`), `paymentReference`,
-`proofImagePaths[]`, `notes`. Not enough stock answers `409` naming the product.
+(`CASH` default, `TELEBIRR`, `CBE_BIRR`, `MPESA`, `BANK_TRANSFER`, `CARD`, `STORE_CREDIT`,
+`CUSTOMER_ACCOUNT`), `paymentReference`, `proofImagePaths[]`, `notes`, and Phase 7 fields
+`customerId`, `couponCode`, `loyaltyPointsToRedeem`, `promotionIds`. Not enough stock answers
+`409` naming the product.
+
+### Phase 7 — Customers, loyalty, promotions
+
+- Customers: `GET/POST /customers`, `GET/PATCH /customers/:id`, `GET /customers/overdue`,
+  `POST /customers/:id/repay|credit-limit|adjust-store-credit`,
+  `GET /customers/:id/ledger|loyalty|statement`.
+- Promotions: `GET/POST /promotions`, `PATCH /promotions/:id`, `POST /promotions/evaluate`,
+  `GET /promotions/:id/usage`.
+- Settings: `loyalty.pointsPerBirr`, `loyalty.birrPerRedeemPoint`, `loyalty.enabled`,
+  `customers.defaultCreditLimit`.
 
 ### Files
 

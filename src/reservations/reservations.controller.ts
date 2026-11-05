@@ -18,6 +18,18 @@ class CreateReservationDto {
 
   @IsOptional()
   @IsString()
+  customerId?: string;
+
+  @IsOptional()
+  @IsString()
+  totalPrice?: string;
+
+  @IsOptional()
+  @IsString()
+  depositPaid?: string;
+
+  @IsOptional()
+  @IsString()
   expiresAt?: string;
 }
 
@@ -29,6 +41,18 @@ class UpdateReservationDto {
   @IsOptional()
   @IsString()
   customerName?: string;
+
+  @IsOptional()
+  @IsString()
+  customerId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  totalPrice?: string | null;
+
+  @IsOptional()
+  @IsString()
+  depositPaid?: string;
 }
 
 type Authed = { user: Actor };
@@ -42,12 +66,14 @@ export class ReservationsController {
   list(
     @Query("status") status?: ReservationStatus,
     @Query("productId") productId?: string,
+    @Query("customerId") customerId?: string,
     @Query("skip") skip?: string,
     @Query("take") take?: string,
   ) {
     return this.reservations.list({
       status,
       productId,
+      customerId,
       skip: skip ? Number(skip) : undefined,
       take: take ? Number(take) : undefined,
     });

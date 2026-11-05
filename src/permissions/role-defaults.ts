@@ -37,6 +37,10 @@ const staffPermissions: PermissionKey[] = [
   PermissionKey.REPORTING_VIEW,
   PermissionKey.SUPPLIERS_MANAGE,
   PermissionKey.PURCHASING_MANAGE,
+  PermissionKey.CUSTOMERS_VIEW,
+  PermissionKey.CUSTOMERS_MANAGE,
+  PermissionKey.CUSTOMER_CREDIT_MANAGE,
+  PermissionKey.PROMOTIONS_MANAGE,
 ];
 
 const cashierPermissions: PermissionKey[] = [
@@ -51,6 +55,8 @@ const cashierPermissions: PermissionKey[] = [
   PermissionKey.RESERVATIONS_MANAGE,
   PermissionKey.REPORTING_VIEW,
   PermissionKey.SHIFT_MANAGE,
+  PermissionKey.CUSTOMERS_VIEW,
+  PermissionKey.CUSTOMERS_MANAGE,
 ];
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {

@@ -29,6 +29,9 @@ import { StoreSettingsModule } from "./settings/store-settings.module";
 import { SetupModule } from "./setup/setup.module";
 import { isSetupEnabled } from "./setup/setup.config";
 import { PermissionsModule } from "./permissions/permissions.module";
+import { CustomersModule } from "./customers/customers.module";
+import { PromotionsModule } from "./promotions/promotions.module";
+import { MessagingModule } from "./messaging/messaging.module";
 
 @Module({
   controllers: [AppController],
@@ -54,6 +57,9 @@ import { PermissionsModule } from "./permissions/permissions.module";
     InventoryModule,
     ShiftsModule,
     PurchasingModule,
+    CustomersModule,
+    PromotionsModule,
+    MessagingModule,
     SalesModule,
     ReservationsModule,
     ReportingModule,

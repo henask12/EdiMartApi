@@ -75,10 +75,10 @@ const spec: Record<PermissionKey, Spec> = {
   [P.SHIFT_VIEW_ALL]: { group: "Cash and shifts", description: "See every cashier's shifts and cash variances.", sensitive: true },
 
   // Customers
-  [P.CUSTOMERS_VIEW]: { group: "Customers", description: "See customers and their purchase history.", status: "planned", plannedPhase: 7 },
-  [P.CUSTOMERS_MANAGE]: { group: "Customers", description: "Add and edit customers.", status: "planned", plannedPhase: 7 },
-  [P.CUSTOMER_CREDIT_MANAGE]: { group: "Customers", description: "Give customers credit (pay later) and record repayments.", sensitive: true, status: "planned", plannedPhase: 7 },
-  [P.PROMOTIONS_MANAGE]: { group: "Customers", description: "Create and edit promotions and coupons.", status: "planned", plannedPhase: 7 },
+  [P.CUSTOMERS_VIEW]: { group: "Customers", description: "See customers and their purchase history." },
+  [P.CUSTOMERS_MANAGE]: { group: "Customers", description: "Add and edit customers." },
+  [P.CUSTOMER_CREDIT_MANAGE]: { group: "Customers", description: "Give customers credit (pay later) and record repayments.", sensitive: true },
+  [P.PROMOTIONS_MANAGE]: { group: "Customers", description: "Create and edit promotions and coupons." },
 
   // Purchasing
   [P.SUPPLIERS_MANAGE]: { group: "Purchasing", description: "Add and edit suppliers." },

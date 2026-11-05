@@ -18,10 +18,12 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsInt,
   IsObject,
   IsOptional,
   IsString,
   MaxLength,
+  Min,
   ValidateNested,
 } from "class-validator";
 import { Public } from "../common/decorators/public.decorator";
@@ -125,6 +127,25 @@ class CheckoutDto {
   @IsOptional()
   @IsBoolean()
   allowExpiredSale?: boolean;
+
+  @IsOptional()
+  @IsString()
+  customerId?: string;
+
+  @IsOptional()
+  @IsString()
+  couponCode?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  loyaltyPointsToRedeem?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  promotionIds?: string[];
 }
 
 class ParkCartDto {

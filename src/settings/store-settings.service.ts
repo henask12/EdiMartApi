@@ -10,6 +10,8 @@ const DEFAULT_POS_PAYMENT_METHODS = JSON.stringify([
   { method: "MPESA", enabled: true, requireReference: true, requireProof: false },
   { method: "BANK_TRANSFER", enabled: true, requireReference: true, requireProof: false },
   { method: "CARD", enabled: true, requireReference: false, requireProof: false },
+  { method: "STORE_CREDIT", enabled: true, requireReference: false, requireProof: false },
+  { method: "CUSTOMER_ACCOUNT", enabled: true, requireReference: false, requireProof: false },
 ]);
 
 /** Known settings and their defaults. Values are stored as JSON in StoreSetting rows. */
@@ -38,6 +40,12 @@ export const SETTING_DEFAULTS = {
   "shifts.eodEmailEnabled": "true",
   /** PO subtotal (Birr) above this needs PURCHASE_APPROVE (or owner). */
   "purchasing.poApproveThreshold": "10000",
+  /** Points earned per Birr spent (0.1 = 1 point per Br 10). */
+  "loyalty.pointsPerBirr": "0.1",
+  /** Birr discount per loyalty point redeemed (0.1 = 100 points = Br 10). */
+  "loyalty.birrPerRedeemPoint": "0.1",
+  "loyalty.enabled": "true",
+  "customers.defaultCreditLimit": "0",
 } as const;
 
 export type SettingKey = keyof typeof SETTING_DEFAULTS;
@@ -63,6 +71,10 @@ const UPDATE_ALIASES: Record<string, SettingKey> = {
   varianceApprovalThreshold: "shifts.varianceApprovalThreshold",
   eodEmailEnabled: "shifts.eodEmailEnabled",
   poApproveThreshold: "purchasing.poApproveThreshold",
+  pointsPerBirr: "loyalty.pointsPerBirr",
+  birrPerRedeemPoint: "loyalty.birrPerRedeemPoint",
+  loyaltyEnabled: "loyalty.enabled",
+  defaultCreditLimit: "customers.defaultCreditLimit",
 };
 
 export type StoreSettingsUpdate = Partial<Record<SettingKey, string>> & {
@@ -85,6 +97,10 @@ export type StoreSettingsUpdate = Partial<Record<SettingKey, string>> & {
   varianceApprovalThreshold?: string;
   eodEmailEnabled?: string;
   poApproveThreshold?: string;
+  pointsPerBirr?: string;
+  birrPerRedeemPoint?: string;
+  loyaltyEnabled?: string;
+  defaultCreditLimit?: string;
 };
 
 @Injectable()
@@ -163,6 +179,9 @@ export class StoreSettingsService {
       "pos.returnWindowDays",
       "shifts.varianceApprovalThreshold",
       "purchasing.poApproveThreshold",
+      "loyalty.pointsPerBirr",
+      "loyalty.birrPerRedeemPoint",
+      "customers.defaultCreditLimit",
     ] as SettingKey[]) {
       if (!resolved.has(numericKey)) {
         continue;
@@ -179,7 +198,11 @@ export class StoreSettingsService {
       resolved.set(numericKey, value.toString());
     }
 
-    for (const boolKey of ["shifts.requireOpenShift", "shifts.eodEmailEnabled"] as SettingKey[]) {
+    for (const boolKey of [
+      "shifts.requireOpenShift",
+      "shifts.eodEmailEnabled",
+      "loyalty.enabled",
+    ] as SettingKey[]) {
       if (!resolved.has(boolKey)) {
         continue;
       }

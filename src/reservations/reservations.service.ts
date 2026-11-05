@@ -16,12 +16,24 @@ import { omit, viewerFor } from "../permissions/access";
 import type { Actor } from "../permissions/permissions.service";
 
 /** Reservations embed their product; cost price is never part of that (it is not needed here). */
-const noProductCost = <T extends { product: { costPrice: unknown } }>(r: T) => ({
-  ...r,
-  product: omit(r.product, "costPrice"),
-});
+const noProductCost = <T extends { product: { costPrice: unknown } }>(r: T) => {
+  const totalPrice = (r as { totalPrice?: Prisma.Decimal | null }).totalPrice ?? null;
+  const depositPaid = (r as { depositPaid?: Prisma.Decimal }).depositPaid;
+  const balanceDue =
+    totalPrice != null && depositPaid != null
+      ? totalPrice.sub(depositPaid).toFixed(2)
+      : null;
+  return {
+    ...r,
+    totalPrice: totalPrice != null ? totalPrice.toFixed(2) : null,
+    depositPaid: depositPaid != null ? depositPaid.toFixed(2) : "0.00",
+    balanceDue,
+    product: omit(r.product, "costPrice"),
+  };
+};
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
+const money = (value: Prisma.Decimal) => value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 
 @Injectable()
 export class ReservationsService {
@@ -37,6 +49,7 @@ export class ReservationsService {
   async list(params: {
     status?: ReservationStatus;
     productId?: string;
+    customerId?: string;
     skip?: number;
     take?: number;
   }) {
@@ -45,6 +58,7 @@ export class ReservationsService {
     const where = {
       status: params.status,
       productId: params.productId,
+      customerId: params.customerId,
     };
     const [items, total] = await Promise.all([
       this.prisma.reservation.findMany({
@@ -64,7 +78,15 @@ export class ReservationsService {
 
   async create(
     userId: string,
-    data: { productId: string; quantity: string; customerName?: string; expiresAt?: string },
+    data: {
+      productId: string;
+      quantity: string;
+      customerName?: string;
+      customerId?: string;
+      totalPrice?: string;
+      depositPaid?: string;
+      expiresAt?: string;
+    },
   ) {
     const qty = toDecimal(data.quantity);
     if (qty.lte(0)) {
@@ -77,6 +99,30 @@ export class ReservationsService {
     }
     if (expiresAt && expiresAt.getTime() <= Date.now()) {
       throw new BadRequestException("Reservation expiry must be in the future");
+    }
+
+    let totalPrice: Prisma.Decimal | null = null;
+    if (data.totalPrice !== undefined && data.totalPrice !== null && data.totalPrice !== "") {
+      totalPrice = money(toDecimal(data.totalPrice));
+      if (totalPrice.lt(0)) {
+        throw new BadRequestException("totalPrice cannot be negative");
+      }
+    }
+    let depositPaid = new Prisma.Decimal(0);
+    if (data.depositPaid !== undefined && data.depositPaid !== null && data.depositPaid !== "") {
+      depositPaid = money(toDecimal(data.depositPaid));
+      if (depositPaid.lt(0)) {
+        throw new BadRequestException("depositPaid cannot be negative");
+      }
+    }
+    if (totalPrice != null && depositPaid.gt(totalPrice)) {
+      throw new BadRequestException("depositPaid cannot exceed totalPrice");
+    }
+    if (data.customerId) {
+      const customer = await this.prisma.customer.findUnique({ where: { id: data.customerId } });
+      if (!customer || !customer.isActive) {
+        throw new BadRequestException("Customer not found or inactive");
+      }
     }
 
     const reservation = await this.prisma.$transaction(async (tx) => {
@@ -99,6 +145,9 @@ export class ReservationsService {
           productId: data.productId,
           quantity: qty,
           customerName: data.customerName?.trim() || null,
+          customerId: data.customerId || null,
+          totalPrice,
+          depositPaid,
           expiresAt,
           createdByUserId: userId,
         },
@@ -199,7 +248,13 @@ export class ReservationsService {
   async update(
     userId: string,
     id: string,
-    data: { quantity?: string; customerName?: string },
+    data: {
+      quantity?: string;
+      customerName?: string;
+      customerId?: string | null;
+      totalPrice?: string | null;
+      depositPaid?: string;
+    },
   ) {
     const reservation = await this.prisma.reservation.findUnique({
       where: { id },
@@ -236,6 +291,39 @@ export class ReservationsService {
         ? data.customerName.trim() || null
         : reservation.customerName;
 
+    let customerId = reservation.customerId;
+    if (data.customerId !== undefined) {
+      customerId = data.customerId?.trim() || null;
+      if (customerId) {
+        const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
+        if (!customer || !customer.isActive) {
+          throw new BadRequestException("Customer not found or inactive");
+        }
+      }
+    }
+
+    let totalPrice = reservation.totalPrice;
+    if (data.totalPrice === null) {
+      totalPrice = null;
+    } else if (data.totalPrice !== undefined) {
+      totalPrice = money(toDecimal(data.totalPrice));
+      if (totalPrice.lt(0)) {
+        throw new BadRequestException("totalPrice cannot be negative");
+      }
+    }
+
+    let depositPaid = reservation.depositPaid;
+    const previousDeposit = reservation.depositPaid;
+    if (data.depositPaid !== undefined) {
+      depositPaid = money(toDecimal(data.depositPaid));
+      if (depositPaid.lt(0)) {
+        throw new BadRequestException("depositPaid cannot be negative");
+      }
+    }
+    if (totalPrice != null && depositPaid.gt(totalPrice)) {
+      throw new BadRequestException("depositPaid cannot exceed totalPrice");
+    }
+
     const { onHand } = await productStockSnapshot(
       this.prisma,
       reservation.productId,
@@ -246,14 +334,22 @@ export class ReservationsService {
     }
 
     const qtyDelta = newQty.sub(oldQty);
-    if (qtyDelta.eq(0) && customerName === reservation.customerName) {
+    const depositIncreased = depositPaid.gt(previousDeposit);
+    if (
+      qtyDelta.eq(0) &&
+      customerName === reservation.customerName &&
+      customerId === reservation.customerId &&
+      ((totalPrice == null && reservation.totalPrice == null) ||
+        (totalPrice != null && reservation.totalPrice != null && totalPrice.eq(reservation.totalPrice))) &&
+      depositPaid.eq(previousDeposit)
+    ) {
       return noProductCost(reservation);
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const res = await tx.reservation.update({
         where: { id },
-        data: { quantity: newQty, customerName },
+        data: { quantity: newQty, customerName, customerId, totalPrice, depositPaid },
         include: { product: true },
       });
 
@@ -315,6 +411,14 @@ export class ReservationsService {
     await this.audit.log(userId, "UPDATE_RESERVE", "Reservation", id, {
       quantity: newQty.toString(),
       customerName,
+      customerId,
+      totalPrice: totalPrice?.toFixed(2) ?? null,
+      depositPaid: depositPaid.toFixed(2),
+      ...(depositIncreased
+        ? {
+            depositIncrease: money(depositPaid.sub(previousDeposit)).toFixed(2),
+          }
+        : {}),
     });
     return noProductCost(updated);
   }

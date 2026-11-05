@@ -9,6 +9,8 @@ import {
 } from "@nestjs/common";
 import {
   CreditCondition,
+  CustomerLedgerKind,
+  LoyaltyTxnKind,
   MovementType,
   PaymentMethod,
   PermissionKey,
@@ -40,6 +42,10 @@ import { NotificationsService } from "../notifications/notifications.service";
 import { hasPermission, type Viewer } from "../permissions/access";
 import type { Actor } from "../permissions/permissions.service";
 import { PrismaService } from "../prisma/prisma.service";
+import {
+  PromotionsService,
+  type AppliedPromotion,
+} from "../promotions/promotions.service";
 import { StoreSettingsService } from "../settings/store-settings.service";
 import { ShiftsService } from "../shifts/shifts.service";
 import { StorageService } from "../storage/storage.service";
@@ -96,6 +102,10 @@ export type CheckoutInput = {
   cartDiscountPercent?: string;
   discountReason?: string;
   allowExpiredSale?: boolean;
+  customerId?: string;
+  couponCode?: string;
+  loyaltyPointsToRedeem?: number;
+  promotionIds?: string[];
 };
 
 export type ReturnLineInput = { saleLineId: string; quantity: string };
@@ -165,6 +175,7 @@ export class SalesService {
     private readonly storage: StorageService,
     private readonly settings: StoreSettingsService,
     private readonly approvals: ApprovalsService,
+    private readonly promotions: PromotionsService,
     private readonly fiscal: FiscalService,
     private readonly shifts: ShiftsService,
   ) {}
@@ -525,6 +536,10 @@ export class SalesService {
       cartDiscountPercent: input.cartDiscountPercent ?? null,
       discountReason: input.discountReason ?? null,
       allowExpiredSale: !!input.allowExpiredSale,
+      customerId: input.customerId ?? null,
+      couponCode: input.couponCode?.trim().toUpperCase() || null,
+      loyaltyPointsToRedeem: input.loyaltyPointsToRedeem ?? 0,
+      promotionIds: [...(input.promotionIds ?? [])].sort(),
     };
     return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
   }
@@ -849,7 +864,86 @@ export class SalesService {
       approvedBy[action] = (await this.approvals.consume(tx, approvalToken!, action, userId)).approverId;
     }
 
-    const scale = subtotal.gt(0) ? money(subtotal.sub(cartDiscount)).div(subtotal) : new Prisma.Decimal(1);
+    // Phase 7: customer, promotions, loyalty redeem — after cart discounts, before payments.
+    let customerId: string | null = input.customerId?.trim() || null;
+    let lockedCustomer: {
+      id: string;
+      isActive: boolean;
+      creditLimit: Prisma.Decimal;
+      creditBalance: Prisma.Decimal;
+      storeCreditBalance: Prisma.Decimal;
+      loyaltyPoints: number;
+    } | null = null;
+
+    if (customerId) {
+      await tx.$queryRaw`SELECT "id" FROM "Customer" WHERE "id" = ${customerId} FOR UPDATE`;
+      lockedCustomer = await tx.customer.findUnique({ where: { id: customerId } });
+      if (!lockedCustomer || !lockedCustomer.isActive) {
+        throw new BadRequestException("Customer not found or inactive");
+      }
+    }
+
+    let promoDiscount = new Prisma.Decimal(0);
+    let appliedPromos: AppliedPromotion[] = [];
+    const afterCart = money(subtotal.sub(cartDiscount));
+    const evalLines = computed.map((l) => ({
+      productId: l.productId,
+      categoryId: productById.get(l.productId)?.categoryId ?? null,
+      lineTotal: l.lineTotal.toFixed(2),
+    }));
+    {
+      const evaluated = await this.promotions.evaluate(
+        {
+          lines: evalLines,
+          subtotal: afterCart.toFixed(2),
+          couponCode: input.couponCode,
+          customerId,
+          promotionIds: input.promotionIds,
+        },
+        tx,
+      );
+      appliedPromos = evaluated.promotions;
+      promoDiscount = money(new Prisma.Decimal(evaluated.totalDiscount));
+      if (promoDiscount.gt(afterCart)) {
+        promoDiscount = afterCart;
+      }
+    }
+
+    let loyaltyDiscount = new Prisma.Decimal(0);
+    let loyaltyPointsRedeemed = 0;
+    const loyaltyEnabled = (storeSettings["loyalty.enabled"] || "true").toLowerCase() === "true";
+    const pointsToRedeem = Math.max(0, Math.floor(Number(input.loyaltyPointsToRedeem ?? 0) || 0));
+    if (pointsToRedeem > 0) {
+      if (!lockedCustomer) {
+        throw new BadRequestException("customerId is required to redeem loyalty points");
+      }
+      if (!loyaltyEnabled) {
+        throw new BadRequestException("Loyalty is disabled");
+      }
+      if (pointsToRedeem > lockedCustomer.loyaltyPoints) {
+        throw new BadRequestException("Not enough loyalty points");
+      }
+      const birrPerPoint = new Prisma.Decimal(storeSettings["loyalty.birrPerRedeemPoint"] || "0.1");
+      const remainingAfterPromo = money(afterCart.sub(promoDiscount));
+      const maxByPoints = money(new Prisma.Decimal(pointsToRedeem).mul(birrPerPoint));
+      loyaltyDiscount = money(Prisma.Decimal.min(maxByPoints, remainingAfterPromo));
+      if (birrPerPoint.gt(0) && loyaltyDiscount.gt(0)) {
+        loyaltyPointsRedeemed = Math.min(
+          pointsToRedeem,
+          Math.ceil(Number(loyaltyDiscount.div(birrPerPoint).toFixed(8))),
+        );
+        loyaltyDiscount = money(
+          Prisma.Decimal.min(
+            new Prisma.Decimal(loyaltyPointsRedeemed).mul(birrPerPoint),
+            remainingAfterPromo,
+          ),
+        );
+      }
+    }
+
+    const cartLevelDiscount = money(cartDiscount.add(promoDiscount).add(loyaltyDiscount));
+    const payable = money(subtotal.sub(cartLevelDiscount));
+    const scale = subtotal.gt(0) ? payable.div(subtotal) : new Prisma.Decimal(1);
     let taxTotal = new Prisma.Decimal(0);
     for (const line of computed) {
       const rawTax = this.taxPortion(line.lineTotal, line.taxCategory, vatRate);
@@ -857,8 +951,8 @@ export class SalesService {
       taxTotal = taxTotal.add(line.taxAmount);
     }
     taxTotal = money(taxTotal);
-    const grandTotal = money(subtotal.sub(cartDiscount));
-    const discountTotal = totalDiscount;
+    const grandTotal = payable;
+    const discountTotal = money(lineDiscountSum.add(cartLevelDiscount));
 
     // Payments: split array or legacy single method.
     type PayRow = {
@@ -926,6 +1020,51 @@ export class SalesService {
 
     const saleNumber = await this.nextSaleNumber(tx, businessDateString());
 
+    // Validate store credit / customer account against locked customer before writing the sale.
+    const storeCreditPay = money(
+      payRows
+        .filter((p) => p.method === PaymentMethod.STORE_CREDIT)
+        .reduce((a, p) => a.add(p.amount), new Prisma.Decimal(0)),
+    );
+    const accountPay = money(
+      payRows
+        .filter((p) => p.method === PaymentMethod.CUSTOMER_ACCOUNT)
+        .reduce((a, p) => a.add(p.amount), new Prisma.Decimal(0)),
+    );
+    if (storeCreditPay.gt(0) || accountPay.gt(0) || loyaltyPointsRedeemed > 0) {
+      if (!lockedCustomer) {
+        throw new BadRequestException("customerId is required for store credit, account, or loyalty");
+      }
+    }
+    if (storeCreditPay.gt(0) && lockedCustomer && storeCreditPay.gt(lockedCustomer.storeCreditBalance)) {
+      throw new BadRequestException(
+        `Insufficient store credit (available ${lockedCustomer.storeCreditBalance.toFixed(2)})`,
+      );
+    }
+    if (accountPay.gt(0)) {
+      if (!hasPermission(actor, PermissionKey.CUSTOMER_CREDIT_MANAGE)) {
+        throw new ForbiddenException("You need permission to charge a customer account");
+      }
+      if (!lockedCustomer) {
+        throw new BadRequestException("customerId is required for CUSTOMER_ACCOUNT payment");
+      }
+      const newBalance = money(lockedCustomer.creditBalance.add(accountPay));
+      if (newBalance.gt(lockedCustomer.creditLimit)) {
+        throw new BadRequestException(
+          `Credit limit exceeded (limit ${lockedCustomer.creditLimit.toFixed(2)}, balance would be ${newBalance.toFixed(2)})`,
+        );
+      }
+    }
+
+    let loyaltyPointsEarned = 0;
+    if (lockedCustomer && loyaltyEnabled && grandTotal.gt(0)) {
+      const pointsPerBirr = new Prisma.Decimal(storeSettings["loyalty.pointsPerBirr"] || "0.1");
+      loyaltyPointsEarned = Math.max(
+        0,
+        Math.floor(Number(grandTotal.mul(pointsPerBirr).toFixed(8))),
+      );
+    }
+
     const sale = await tx.sale.create({
       data: {
         saleNumber,
@@ -938,6 +1077,9 @@ export class SalesService {
         discountReason: input.discountReason?.trim() || null,
         createdByUserId: userId,
         shiftId: shiftId ?? null,
+        customerId,
+        loyaltyPointsEarned,
+        loyaltyPointsRedeemed,
         lines: {
           create: computed.map((l) => ({
             productId: l.productId,
@@ -968,6 +1110,89 @@ export class SalesService {
           : undefined,
       },
     });
+
+    for (const promo of appliedPromos) {
+      await tx.promotionUsage.create({
+        data: {
+          promotionId: promo.promotionId,
+          saleId: sale.id,
+          customerId,
+          discountAmount: money(new Prisma.Decimal(promo.discountAmount)),
+        },
+      });
+      await tx.promotion.update({
+        where: { id: promo.promotionId },
+        data: { usageCount: { increment: 1 } },
+      });
+    }
+
+    if (lockedCustomer) {
+      let storeCreditBalance = lockedCustomer.storeCreditBalance;
+      let creditBalance = lockedCustomer.creditBalance;
+      let loyaltyPoints = lockedCustomer.loyaltyPoints;
+
+      if (storeCreditPay.gt(0)) {
+        storeCreditBalance = money(storeCreditBalance.sub(storeCreditPay));
+        await tx.customerLedgerEntry.create({
+          data: {
+            customerId: lockedCustomer.id,
+            kind: CustomerLedgerKind.STORE_CREDIT_REDEEM,
+            amount: storeCreditPay,
+            balanceAfter: storeCreditBalance,
+            saleId: sale.id,
+            notes: "Redeemed at POS",
+            createdByUserId: userId,
+          },
+        });
+      }
+      if (accountPay.gt(0)) {
+        creditBalance = money(creditBalance.add(accountPay));
+        await tx.customerLedgerEntry.create({
+          data: {
+            customerId: lockedCustomer.id,
+            kind: CustomerLedgerKind.SALE_CREDIT,
+            amount: accountPay,
+            balanceAfter: creditBalance,
+            saleId: sale.id,
+            notes: "Pay later",
+            createdByUserId: userId,
+          },
+        });
+      }
+      if (loyaltyPointsRedeemed > 0) {
+        loyaltyPoints -= loyaltyPointsRedeemed;
+        await tx.loyaltyTransaction.create({
+          data: {
+            customerId: lockedCustomer.id,
+            kind: LoyaltyTxnKind.REDEEM,
+            points: -loyaltyPointsRedeemed,
+            balanceAfter: loyaltyPoints,
+            saleId: sale.id,
+            notes: `Redeemed for Br ${loyaltyDiscount.toFixed(2)}`,
+            createdByUserId: userId,
+          },
+        });
+      }
+      if (loyaltyPointsEarned > 0) {
+        loyaltyPoints += loyaltyPointsEarned;
+        await tx.loyaltyTransaction.create({
+          data: {
+            customerId: lockedCustomer.id,
+            kind: LoyaltyTxnKind.EARN,
+            points: loyaltyPointsEarned,
+            balanceAfter: loyaltyPoints,
+            saleId: sale.id,
+            notes: `Earned on sale ${saleNumber}`,
+            createdByUserId: userId,
+          },
+        });
+      }
+
+      await tx.customer.update({
+        where: { id: lockedCustomer.id },
+        data: { storeCreditBalance, creditBalance, loyaltyPoints },
+      });
+    }
 
     const saleLines = await tx.saleLine.findMany({ where: { saleId: sale.id } });
     const saleLineByProduct = new Map<string, string>();
@@ -1067,6 +1292,12 @@ export class SalesService {
           paymentMethod: payRows.map((p) => p.method).join("+"),
           discountTotal: discountTotal.toFixed(2),
           taxTotal: taxTotal.toFixed(2),
+          customerId,
+          promoDiscount: promoDiscount.toFixed(2),
+          loyaltyDiscount: loyaltyDiscount.toFixed(2),
+          loyaltyPointsEarned,
+          loyaltyPointsRedeemed,
+          promotionIds: appliedPromos.map((p) => p.promotionId),
           ...(Object.keys(approvedBy).length ? { approvedBy } : {}),
         },
       },
@@ -1552,7 +1783,16 @@ export class SalesService {
         creditLines.reduce((a, l) => a.add(l.lineTotal), new Prisma.Decimal(0)),
       );
       const creditNumber = await this.nextCreditNumber(tx, today);
-      await tx.creditNote.create({
+
+      if (input.refundMethod === PaymentMethod.STORE_CREDIT) {
+        if (!sale.customerId) {
+          throw new BadRequestException(
+            "Store credit refunds require the sale to have a customer; attach a customer or choose another refund method",
+          );
+        }
+      }
+
+      const creditNote = await tx.creditNote.create({
         data: {
           creditNumber,
           saleId: sale.id,
@@ -1576,6 +1816,31 @@ export class SalesService {
           },
         },
       });
+
+      if (input.refundMethod === PaymentMethod.STORE_CREDIT && sale.customerId) {
+        await tx.$queryRaw`SELECT "id" FROM "Customer" WHERE "id" = ${sale.customerId} FOR UPDATE`;
+        const customer = await tx.customer.findUnique({ where: { id: sale.customerId } });
+        if (!customer) {
+          throw new BadRequestException("Customer on this sale was not found");
+        }
+        const storeCreditBalance = money(customer.storeCreditBalance.add(refundAmount));
+        await tx.customer.update({
+          where: { id: customer.id },
+          data: { storeCreditBalance },
+        });
+        await tx.customerLedgerEntry.create({
+          data: {
+            customerId: customer.id,
+            kind: CustomerLedgerKind.STORE_CREDIT_ISSUE,
+            amount: refundAmount,
+            balanceAfter: storeCreditBalance,
+            saleId: sale.id,
+            creditNoteId: creditNote.id,
+            notes: `Return ${creditNumber}`,
+            createdByUserId: actor.userId,
+          },
+        });
+      }
 
       // Recompute remaining sellable qty across all lines.
       const allCreditLines = await tx.creditNoteLine.findMany({

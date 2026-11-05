@@ -1,5 +1,44 @@
 # Changelog
 
+## Phase 7 — Customers, loyalty and promotions (API)
+
+### Added
+- **Customers**: `GET/POST /customers`, `GET/PATCH /customers/:id` (profile with spend
+  stats, favourites, last visit), search `?q=`, `GET /customers/overdue`,
+  `GET /customers/:id/ledger|loyalty|statement`,
+  `POST /customers/:id/repay|credit-limit|adjust-store-credit`.
+  Ethiopian phone normalize (`09…`/`07…` → `+2519…`/`+2517…`).
+- **Loyalty**: settings `loyalty.pointsPerBirr` (default `"0.1"`),
+  `loyalty.birrPerRedeemPoint` (`"0.1"`), `loyalty.enabled`. Earn on checkout;
+  redeem via `loyaltyPointsToRedeem` on checkout.
+- **Store credit / pay later**: payment methods `STORE_CREDIT` and
+  `CUSTOMER_ACCOUNT` (enabled in default POS methods). Account charges need
+  `CUSTOMER_CREDIT_MANAGE`. Returns with `refundMethod=STORE_CREDIT` issue
+  store credit when the sale has a customer.
+- **Promotions**: CRUD `/promotions`, `POST /promotions/evaluate`,
+  `GET /promotions/:id/usage`. Types: percent/fixed/min-spend percent|fixed;
+  coupon codes; schedule windows; stacking + priority. No buy-X-get-Y.
+- **Messaging**: `MessagingModule` with `MessagingProvider` + Resend email
+  stub; SMS/Telegram log stubs; marketing respects `marketingOptOut`.
+- **Checkout** extras: `customerId`, `couponCode`, `loyaltyPointsToRedeem`,
+  `promotionIds` (hashed into idempotency). Promo/loyalty discounts applied
+  after cart discounts and before payment validation; still under row locks.
+- **Layaway reservations**: optional `customerId`, `totalPrice`, `depositPaid`;
+  list filter `customerId`; `balanceDue` when total set.
+- Permissions **active**: `CUSTOMERS_VIEW`, `CUSTOMERS_MANAGE`,
+  `CUSTOMER_CREDIT_MANAGE`, `PROMOTIONS_MANAGE`. Cashier/staff get VIEW+MANAGE;
+  staff also CREDIT + PROMOTIONS.
+
+### Database (additive only)
+- Migration `20261104200000_phase7_customers`: Customer, CustomerLedgerEntry,
+  LoyaltyTransaction, Promotion, PromotionUsage; PaymentMethod STORE_CREDIT +
+  CUSTOMER_ACCOUNT; Sale.customerId + loyalty fields; Reservation layaway
+  fields; CreditNote.ledgerEntries.
+
+### Defaults (Section 0 blank)
+- 1 loyalty point per Br 10; 100 points = Br 10 off; credit ON with default
+  limit 0; store credit from returns; no buy-X-get-Y / gift bundles.
+
 ## Phase 6 — Purchasing, suppliers and replenishment (API)
 
 ### Added
