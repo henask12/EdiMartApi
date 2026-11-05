@@ -1,14 +1,15 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { isOwnerRoleName, OWNER_ROLE } from "../common/role.constants";
+import { assertPasswordPolicy } from "../common/password-policy";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { Actor, actorIsOwner, PermissionsService } from "../permissions/permissions.service";
-import { ForbiddenException } from "@nestjs/common";
 
 @Injectable()
 export class UsersService {
@@ -84,6 +85,7 @@ export class UsersService {
       throw new BadRequestException("Invalid role");
     }
     this.permissions.assertCanAssignRole(actor, role);
+    assertPasswordPolicy(data.password);
     const passwordHash = await bcrypt.hash(data.password, 10);
     const user = await this.prisma.user.create({
       data: {
@@ -168,6 +170,7 @@ export class UsersService {
       throw new NotFoundException("User not found");
     }
     await this.assertCanManage(actor, user);
+    assertPasswordPolicy(password);
     const passwordHash = await bcrypt.hash(password, 10);
     await this.prisma.user.update({
       where: { id },
@@ -219,6 +222,7 @@ export class UsersService {
     if (currentPassword === newPassword) {
       throw new BadRequestException("Choose a new password that is different from the current one");
     }
+    assertPasswordPolicy(newPassword);
     const passwordHash = await bcrypt.hash(newPassword, 10);
     await this.prisma.user.update({
       where: { id: userId },

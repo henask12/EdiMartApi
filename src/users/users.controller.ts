@@ -3,6 +3,7 @@ import { PermissionKey } from "@prisma/client";
 import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import type { Actor } from "../permissions/permissions.service";
 import { IsBoolean, IsEmail, IsOptional, IsString, MinLength } from "class-validator";
+import { PASSWORD_MIN_LENGTH } from "../common/password-policy";
 import { UsersService } from "./users.service";
 
 class CreateUserDto {
@@ -17,7 +18,7 @@ class CreateUserDto {
   role!: string;
 
   @IsString()
-  @MinLength(6)
+  @MinLength(PASSWORD_MIN_LENGTH)
   password!: string;
 }
 
@@ -41,7 +42,7 @@ class UpdateUserDto {
 
 class ResetPasswordDto {
   @IsString()
-  @MinLength(6)
+  @MinLength(PASSWORD_MIN_LENGTH)
   password!: string;
 }
 

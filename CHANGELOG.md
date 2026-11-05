@@ -1,5 +1,34 @@
 # Changelog
 
+## Phase 9 — Offline sync, reliability and security (API)
+
+### Added
+- **Auth sessions**: login issues JWT with `jti` and creates `AuthSession`.
+  `GET /auth/sessions`, `POST /auth/sessions/revoke-others`,
+  `POST /auth/sessions/:id/revoke`, `POST /auth/logout`. JwtStrategy rejects
+  revoked/missing/expired sessions.
+- **TOTP 2FA** (optional, any user; `speakeasy`): `POST /auth/totp/setup|enable|disable`.
+  Login returns `401` with `code: TOTP_REQUIRED` when enabled and code missing/invalid.
+- **Password policy**: min 10 chars, at least one letter + one digit
+  (`src/common/password-policy.ts`) on change-password, create user, reset password.
+- **Offline checkout**: `clientSaleId`, `createdOffline`, `registerCode` on
+  `POST /sales/checkout`. Offline sale numbers
+  `SALE-YYYYMMDD-{register}-NNNN`. Same `clientSaleId` + hash replays; different
+  payload → `CLIENT_SALE_ID_CONFLICT`.
+- **Sync conflicts**: `POST/GET /sync/conflicts`, `POST /sync/conflicts/:id/resolve`.
+  Client posts failed offline work here (stock-count / goods-receipt keep using
+  their normal endpoints; on failure post a conflict — nothing is silently dropped).
+- **Audit viewer**: `GET /audit?action&entity&userId&from&to&take&skip` (`AUDIT_VIEW`, now active).
+- **pg_trgm product search** when `q` is set (falls back to ILIKE if extension missing).
+- **Observability**: pino logger in `main.ts`; optional `@sentry/node` when `SENTRY_DSN` set.
+- **Backups**: `scripts/backup-pg.sh`, `scripts/backup-pg.mjs`, `docs/BACKUPS.md`.
+- **CI**: `.github/workflows/ci.yml` (typecheck, prisma validate, test).
+
+### Database (additive only)
+- Migration `20261105120000_phase9_reliability` (schema already applied on this branch):
+  User.totp*, Sale.clientSaleId/registerCode/createdOffline, AuthSession, SyncConflict,
+  pg_trgm indexes.
+
 ## Phase 8 — Dashboards and reports (API)
 
 ### Added

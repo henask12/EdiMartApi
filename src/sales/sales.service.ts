@@ -106,6 +106,11 @@ export type CheckoutInput = {
   couponCode?: string;
   loyaltyPointsToRedeem?: number;
   promotionIds?: string[];
+  /** Client outbox UUID — unique; replays when request hash matches. */
+  clientSaleId?: string;
+  createdOffline?: boolean;
+  /** Register code embedded in offline sale numbers (never collides with online). */
+  registerCode?: string;
 };
 
 export type ReturnLineInput = { saleLineId: string; quantity: string };
@@ -540,6 +545,9 @@ export class SalesService {
       couponCode: input.couponCode?.trim().toUpperCase() || null,
       loyaltyPointsToRedeem: input.loyaltyPointsToRedeem ?? 0,
       promotionIds: [...(input.promotionIds ?? [])].sort(),
+      clientSaleId: input.clientSaleId?.trim() || null,
+      createdOffline: !!input.createdOffline,
+      registerCode: input.registerCode?.trim().toUpperCase() || null,
     };
     return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
   }
@@ -581,6 +589,34 @@ export class SalesService {
         throw new ConflictException("This Idempotency-Key was already used for a different sale");
       }
       return { saleId: existingKey.saleId, replayed: true };
+    }
+
+    const clientSaleId = input.clientSaleId?.trim() || null;
+    if (clientSaleId) {
+      const existingByClient = await tx.sale.findUnique({ where: { clientSaleId } });
+      if (existingByClient) {
+        const priorKey = await tx.idempotencyKey.findFirst({
+          where: { saleId: existingByClient.id, scope: CHECKOUT_SCOPE },
+        });
+        if (priorKey && priorKey.requestHash === requestHash) {
+          return { saleId: existingByClient.id, replayed: true };
+        }
+        throw new ConflictException({
+          statusCode: 409,
+          error: "Conflict",
+          code: "CLIENT_SALE_ID_CONFLICT",
+          message: "clientSaleId already exists for a different sale payload",
+        });
+      }
+    }
+
+    const registerCodeRaw = input.registerCode?.trim() || null;
+    const createdOffline = Boolean(input.createdOffline || registerCodeRaw);
+    const safeRegister = registerCodeRaw
+      ? registerCodeRaw.toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 24)
+      : null;
+    if (createdOffline && !safeRegister) {
+      throw new BadRequestException("registerCode is required for offline sales");
     }
 
     const products = await tx.product.findMany({
@@ -1018,7 +1054,9 @@ export class SalesService {
       }
     }
 
-    const saleNumber = await this.nextSaleNumber(tx, businessDateString());
+    const saleNumber = createdOffline
+      ? await this.nextOfflineSaleNumber(tx, businessDateString(), safeRegister!)
+      : await this.nextSaleNumber(tx, businessDateString());
 
     // Validate store credit / customer account against locked customer before writing the sale.
     const storeCreditPay = money(
@@ -1080,6 +1118,9 @@ export class SalesService {
         customerId,
         loyaltyPointsEarned,
         loyaltyPointsRedeemed,
+        clientSaleId,
+        registerCode: safeRegister,
+        createdOffline,
         lines: {
           create: computed.map((l) => ({
             productId: l.productId,
@@ -1971,6 +2012,30 @@ export class SalesService {
         RETURNING "value"`;
     }
     return `SALE-${date.replace(/-/g, "")}-${String(rows[0].value).padStart(4, "0")}`;
+  }
+
+  /**
+   * Offline numbers embed the register code so they never collide with online
+   * `SALE-YYYYMMDD-NNNN` (DocumentCounter scope is per register).
+   */
+  private async nextOfflineSaleNumber(
+    tx: Prisma.TransactionClient,
+    date: string,
+    safeRegister: string,
+  ) {
+    const scope = `SALE-OFFLINE-${safeRegister}`;
+    let rows = await tx.$queryRaw<{ value: number }[]>`
+      UPDATE "DocumentCounter" SET "value" = "value" + 1
+       WHERE "scope" = ${scope} AND "date" = ${date}
+   RETURNING "value"`;
+    if (rows.length === 0) {
+      rows = await tx.$queryRaw<{ value: number }[]>`
+        INSERT INTO "DocumentCounter" ("scope", "date", "value") VALUES (${scope}, ${date}, 1)
+        ON CONFLICT ("scope", "date") DO UPDATE SET "value" = "DocumentCounter"."value" + 1
+        RETURNING "value"`;
+    }
+    const compact = date.replace(/-/g, "");
+    return `SALE-${compact}-${safeRegister}-${String(rows[0].value).padStart(4, "0")}`;
   }
 
   async todaySummary(includeCost = false) {

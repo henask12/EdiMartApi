@@ -32,6 +32,7 @@ import { PermissionsModule } from "./permissions/permissions.module";
 import { CustomersModule } from "./customers/customers.module";
 import { PromotionsModule } from "./promotions/promotions.module";
 import { MessagingModule } from "./messaging/messaging.module";
+import { SyncModule } from "./sync/sync.module";
 
 @Module({
   controllers: [AppController],
@@ -65,6 +66,7 @@ import { MessagingModule } from "./messaging/messaging.module";
     ReportingModule,
     NotificationsModule,
     HealthModule,
+    SyncModule,
     // First-run seeding endpoints; absent (404) unless SETUP_ENABLED is on.
     ...(isSetupEnabled() ? [SetupModule] : []),
   ],

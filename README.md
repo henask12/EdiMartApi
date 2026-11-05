@@ -72,12 +72,27 @@ All under `/reporting` with `REPORTING_VIEW` (cost/profit fields need
 - Purchasing: `purchases-by-supplier`, `open-pos`, `aged-payables`, `landed-cost`.
 - CSV: add `?format=csv` on key reports, or `GET /reporting/export/:reportKey.csv`.
 
+### Phase 9 — Sessions, TOTP, offline sync, reliability
+
+- Sessions: `GET /auth/sessions`, `POST /auth/sessions/revoke-others`,
+  `POST /auth/sessions/:id/revoke`, `POST /auth/logout`.
+- TOTP: `POST /auth/totp/setup|enable|disable`; login may return `TOTP_REQUIRED`.
+- Offline checkout fields on `POST /sales/checkout`: `clientSaleId`, `createdOffline`,
+  `registerCode` (sale numbers `SALE-YYYYMMDD-{register}-NNNN`).
+- Sync conflicts: `POST/GET /sync/conflicts`, `POST /sync/conflicts/:id/resolve`.
+  Prefer normal stock-count / goods-receipt endpoints; on failure post a conflict.
+- Audit: `GET /audit` (`AUDIT_VIEW`). Backups: [docs/BACKUPS.md](docs/BACKUPS.md).
+- Optional `SENTRY_DSN` / `SENTRY_TRACES_SAMPLE_RATE`; structured logs via pino.
+
 ### Files
 
 Product photos are public; payment proofs are private and only reachable through short-lived
 signed links. `STORAGE_DRIVER=local` needs a persistent disk (Render's free tier has none: files
 vanish on redeploy). For production use `STORAGE_DRIVER=s3` with Cloudflare R2, AWS S3 or Supabase
 Storage (see `.env.example`), then run `npm run uploads:migrate -- --apply` once.
+
+**Render free tier sleeps after inactivity** and is a poor fit for a live till. Use a paid
+always-on instance (and durable storage / S3) for a shop that sells during the day.
 
 ### Migrations
 

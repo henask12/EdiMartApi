@@ -146,6 +146,20 @@ class CheckoutDto {
   @IsArray()
   @IsString({ each: true })
   promotionIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  clientSaleId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  createdOffline?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  registerCode?: string;
 }
 
 class ParkCartDto {

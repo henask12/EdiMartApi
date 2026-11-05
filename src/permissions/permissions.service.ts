@@ -10,7 +10,12 @@ import { ALL_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from "./role-defaults";
 import { PrismaService } from "../prisma/prisma.service";
 
 /** The signed-in person doing a role or user change. */
-export type Actor = { userId: string; roleName: string; permissions: PermissionKey[] };
+export type Actor = {
+  userId: string;
+  roleName: string;
+  permissions: PermissionKey[];
+  jti?: string;
+};
 
 export const actorIsOwner = (actor: Pick<Actor, "roleName">) => isOwnerRoleName(actor.roleName);
 

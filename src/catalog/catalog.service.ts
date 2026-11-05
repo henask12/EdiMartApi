@@ -118,11 +118,17 @@ export class CatalogService {
     q?: string;
     categoryId?: string;
     productTypeId?: string;
+    /** When set, restrict to these product ids (from trgm search). */
+    ids?: string[];
   }): Prisma.ProductWhereInput {
     const where: Prisma.ProductWhereInput = { isActive: true };
-    if (params.q) {
+    if (params.ids) {
+      where.id = { in: params.ids };
+    } else if (params.q) {
       where.OR = [
         { name: { contains: params.q, mode: "insensitive" } },
+        { nameAm: { contains: params.q, mode: "insensitive" } },
+        { brand: { contains: params.q, mode: "insensitive" } },
         { sku: { contains: params.q, mode: "insensitive" } },
       ];
     }
@@ -135,11 +141,45 @@ export class CatalogService {
     return where;
   }
 
+  /**
+   * Prefer pg_trgm `%` / similarity when the extension is available; fall back to ILIKE.
+   * Returns null when q is empty; empty array when nothing matches.
+   */
+  private async searchProductIdsByTrgm(q: string): Promise<string[] | null> {
+    const term = q.trim();
+    if (!term) {
+      return null;
+    }
+    try {
+      const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+        SELECT p.id
+          FROM "Product" p
+         WHERE p."isActive" = true
+           AND (
+             p.name % ${term}
+             OR COALESCE(p."nameAm", '') % ${term}
+             OR COALESCE(p.brand, '') % ${term}
+             OR p.sku ILIKE ${"%" + term + "%"}
+             OR p.name ILIKE ${"%" + term + "%"}
+           )
+         ORDER BY GREATEST(
+           similarity(p.name, ${term}),
+           similarity(COALESCE(p."nameAm", ''), ${term}),
+           similarity(COALESCE(p.brand, ''), ${term})
+         ) DESC,
+         p.name ASC
+         LIMIT 500`;
+      return rows.map((r) => r.id);
+    } catch {
+      return null;
+    }
+  }
+
   async listProducts(
     params: {
-    q?: string;
-    categoryId?: string;
-    productTypeId?: string;
+      q?: string;
+      categoryId?: string;
+      productTypeId?: string;
       stockStatus?: string;
       skip?: number;
       take?: number;
@@ -148,7 +188,14 @@ export class CatalogService {
   ) {
     const take = Math.min(params.take ?? 100, 200);
     const skip = params.skip ?? 0;
-    const where = this.buildWhere(params);
+    let ids: string[] | undefined;
+    if (params.q?.trim()) {
+      const trgmIds = await this.searchProductIdsByTrgm(params.q);
+      if (trgmIds) {
+        ids = trgmIds;
+      }
+    }
+    const where = this.buildWhere({ ...params, ids });
     const defaultLoc = await this.locations.getDefault();
     const stockFilter = normalizeStockStatus(params.stockStatus);
 
@@ -165,6 +212,24 @@ export class CatalogService {
       const total = filtered.length;
       const items = filtered.slice(skip, skip + take);
       return { items, total, skip, take };
+    }
+
+    // Preserve trgm relevance order when we have ids from similarity search.
+    if (ids) {
+      if (ids.length === 0) {
+        return { items: [], total: 0, skip, take };
+      }
+      const pageIds = ids.slice(skip, skip + take);
+      const raw = await this.prisma.product.findMany({
+        where: { ...where, id: { in: pageIds } },
+        include: productInclude,
+      });
+      const byId = new Map(raw.map((p) => [p.id, p]));
+      const ordered = pageIds.map((id) => byId.get(id)).filter(Boolean) as ProductWithRelations[];
+      const items = await Promise.all(
+        ordered.map((p) => this.enrichProduct(p, defaultLoc.id, includeCost)),
+      );
+      return { items, total: ids.length, skip, take };
     }
 
     const [raw, total] = await Promise.all([

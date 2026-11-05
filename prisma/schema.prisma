@@ -170,6 +170,9 @@ model User {
   pinFailedAttempts  Int           @default(0)
   pinLockedUntil     DateTime?
   locale             String?
+  /// Base32 TOTP secret when 2FA is enabled (Phase 9). Never returned in API responses.
+  totpSecret         String?
+  totpEnabled        Boolean          @default(false)
   roleId          String
   role            Role             @relation(fields: [roleId], references: [id])
   createdAt       DateTime         @default(now())
@@ -203,6 +206,8 @@ model User {
   customerLedger     CustomerLedgerEntry[] @relation("CustomerLedgerCreatedBy")
   loyaltyTxns        LoyaltyTransaction[] @relation("LoyaltyTxnCreatedBy")
   promotionsCreated  Promotion[]          @relation("PromotionCreatedBy")
+  sessions           AuthSession[]
+  syncConflictsResolved SyncConflict[]    @relation("SyncConflictResolvedBy")
 }
 
 model AuditLog {
@@ -449,6 +454,12 @@ model Sale {
   customer        Customer?             @relation(fields: [customerId], references: [id])
   loyaltyPointsEarned   Int             @default(0)
   loyaltyPointsRedeemed Int             @default(0)
+  /// Client-generated UUID for offline/outbox sales (Phase 9); unique when set.
+  clientSaleId    String?               @unique
+  /// Register code embedded in offline sale numbers (e.g. REGISTER-1).
+  registerCode    String?
+  /// true when created from an offline sync.
+  createdOffline  Boolean               @default(false)
   createdByUserId String
   createdBy       User                  @relation("SaleCreatedBy", fields: [createdByUserId], references: [id])
   createdAt       DateTime              @default(now())
@@ -1353,4 +1364,50 @@ model DailyProductSales {
   @@unique([businessDate, productId])
   @@index([businessDate])
   @@index([productId, businessDate])
+}
+
+// ─── Phase 9: sessions, offline sync conflicts ───────────────────────────────
+
+/// One row per issued access token (jti). Revoking sets revokedAt so JWT validate fails.
+model AuthSession {
+  id               String    @id @default(cuid())
+  /// JWT `jti` claim — unique.
+  jti              String    @unique
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userAgent        String?
+  ip               String?
+  createdAt        DateTime  @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  lastSeenAt       DateTime  @default(now())
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+}
+
+/// Offline sync items that could not be applied automatically (never silently dropped).
+model SyncConflict {
+  id              String    @id @default(cuid())
+  /// CHECKOUT | STOCK_COUNT | GOODS_RECEIPT | OTHER
+  kind            String
+  /// OPEN | RESOLVED | DISMISSED
+  status          String    @default("OPEN")
+  /// Client outbox UUID / clientSaleId / etc.
+  clientRef       String?
+  payload         Json
+  /// Machine code e.g. STOCK_NEGATIVE, IDEMPOTENCY_MISMATCH
+  errorCode       String?
+  errorMessage    String?
+  createdByUserId String?
+  resolvedByUserId String?
+  resolvedBy      User?     @relation("SyncConflictResolvedBy", fields: [resolvedByUserId], references: [id])
+  resolvedAt      DateTime?
+  resolutionNote  String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([kind, status])
+  @@index([clientRef])
 }

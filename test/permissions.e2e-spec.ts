@@ -233,6 +233,17 @@ const RULES: Rule[] = [
   { method: "patch", path: "/roles/some-id/permissions", all: [K.ROLES_MANAGE] },
   { method: "delete", path: "/roles/some-id", all: [K.ROLES_MANAGE] },
   { method: "get", path: "/roles/some-id/users", all: [K.ROLES_MANAGE] },
+  { method: "get", path: "/audit", all: [K.AUDIT_VIEW] },
+  {
+    method: "get",
+    path: "/sync/conflicts",
+    any: [K.SALES_VIEW_ALL, K.SETTINGS_MANAGE, K.AUDIT_VIEW],
+  },
+  {
+    method: "post",
+    path: "/sync/conflicts/some-id/resolve",
+    any: [K.SETTINGS_MANAGE, K.AUDIT_VIEW],
+  },
 ];
 
 /** Routes any signed-in user may call (they only touch the caller's own data). */
@@ -241,6 +252,14 @@ const ANY_SIGNED_IN: Pick<Rule, "method" | "path">[] = [
   { method: "patch", path: "/auth/me" },
   { method: "post", path: "/auth/change-password" },
   { method: "put", path: "/auth/pin" },
+  { method: "get", path: "/auth/sessions" },
+  { method: "post", path: "/auth/sessions/revoke-others" },
+  { method: "post", path: "/auth/sessions/some-id/revoke" },
+  { method: "post", path: "/auth/logout" },
+  { method: "post", path: "/auth/totp/setup" },
+  { method: "post", path: "/auth/totp/enable" },
+  { method: "post", path: "/auth/totp/disable" },
+  { method: "post", path: "/sync/conflicts" },
   { method: "get", path: "/approvals/managers?action=SALE_VOID" },
   { method: "post", path: "/approvals" },
   { method: "get", path: "/locations" },
@@ -346,10 +365,14 @@ describe("one permission model", () => {
     );
 
     it("the owner passes every check (the only automatic bypass)", async () => {
-      const owner = await login(t, "owner@test.local");
+      let owner = await login(t, "owner@test.local");
       for (const rule of [...RULES, ...ANY_SIGNED_IN]) {
         const status = (await call(owner, rule)).status;
         expect([401, 403]).not.toContain(status);
+        // Logout revokes the current JWT; mint a fresh one so later routes still pass.
+        if (rule.method === "post" && rule.path === "/auth/logout") {
+          owner = await login(t, "owner@test.local");
+        }
       }
     });
 

@@ -96,7 +96,7 @@ const spec: Record<PermissionKey, Spec> = {
   [P.ROLES_MANAGE]: { group: "Administration", description: "Change what each role is allowed to do.", sensitive: true },
   [P.SETTINGS_EMAILS]: { group: "Administration", description: "Choose who receives stock and expiry alert e-mails.", sensitive: true },
   [P.SETTINGS_MANAGE]: { group: "Administration", description: "Change shop settings such as approval limits.", sensitive: true },
-  [P.AUDIT_VIEW]: { group: "Administration", description: "Read the audit log.", sensitive: true, status: "planned", plannedPhase: 9 },
+  [P.AUDIT_VIEW]: { group: "Administration", description: "Read the audit log.", sensitive: true },
 };
 
 const labels: Record<PermissionKey, string> = {
