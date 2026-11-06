@@ -2,10 +2,8 @@
   "name": "edimart-api",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "npm@10.9.2",
   "engines": {
-    "node": ">=20",
-    "npm": ">=10"
+    "node": ">=20"
   },
   "scripts": {
     "generate": "node node_modules/prisma/build/index.js generate",
