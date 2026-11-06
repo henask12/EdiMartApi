@@ -2,8 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from "@
 import { PermissionKey } from "@prisma/client";
 import { IsOptional, IsString } from "class-validator";
 import { RequirePermissions } from "../common/decorators/permissions.decorator";
-import { Roles } from "../common/decorators/roles.decorator";
-import { CASHIER_ROLE, OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
+import type { Actor } from "../permissions/permissions.service";
 import { ExpensesService } from "./expenses.service";
 
 class CreateExpenseDto {
@@ -31,13 +30,12 @@ class UpdateExpenseDto {
   expenseDate?: string;
 }
 
-type Authed = { user: { userId: string } };
+type Authed = { user: Actor };
 
 @Controller("expenses")
 export class ExpensesController {
   constructor(private readonly expenses: ExpensesService) {}
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @RequirePermissions(PermissionKey.EXPENSES_MANAGE)
   @Get()
   list(
@@ -54,21 +52,18 @@ export class ExpensesController {
     });
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @RequirePermissions(PermissionKey.EXPENSES_MANAGE)
   @Post()
   create(@Req() req: Authed, @Body() body: CreateExpenseDto) {
     return this.expenses.create(req.user.userId, body);
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @RequirePermissions(PermissionKey.EXPENSES_MANAGE)
   @Patch(":id")
   update(@Param("id") id: string, @Body() body: UpdateExpenseDto) {
     return this.expenses.update(id, body);
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
   @RequirePermissions(PermissionKey.EXPENSES_MANAGE)
   @Delete(":id")
   remove(@Param("id") id: string) {

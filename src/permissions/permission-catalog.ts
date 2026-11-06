@@ -56,6 +56,11 @@ const spec: Record<PermissionKey, Spec> = {
   [P.STOCK_WRITE_OFF]: { group: "Stock", description: "Write off expired or damaged stock.", sensitive: true },
   [P.LOCATIONS_MANAGE]: { group: "Stock", description: "Set up shelves, back store and other stock locations." },
   [P.RESERVATIONS_MANAGE]: { group: "Stock", description: "See, change, cancel and complete reservations." },
+  [P.EXPENSES_MANAGE]: {
+    group: "Cash and shifts",
+    description: "Record and edit shop expenses.",
+    sensitive: true,
+  },
 
   // Sales
   [P.SALES_CREATE]: { group: "Sales", description: "Record sales." },
@@ -122,6 +127,7 @@ const labels: Record<PermissionKey, string> = {
   [P.STOCK_WRITE_OFF]: "Write off stock",
   [P.LOCATIONS_MANAGE]: "Manage locations",
   [P.RESERVATIONS_MANAGE]: "Manage reservations",
+  [P.EXPENSES_MANAGE]: "Manage expenses",
   [P.SALES_CREATE]: "Record sales",
   [P.SALES_VIEW]: "Open the Sales page",
   [P.SALES_VIEW_OWN]: "View own sales",
