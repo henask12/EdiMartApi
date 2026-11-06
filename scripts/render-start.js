@@ -126,11 +126,38 @@ const recoverMigrationHistory = (output) => {
   baselineExistingSchema();
 };
 
+const printDatabaseUnreachableHelp = (output) => {
+  console.error("prisma migrate deploy failed:\n", output);
+  console.error(`
+================================================================================
+P1001: the API cannot open a TCP connection to Postgres.
+
+On Render this is almost never a code bug. Fix DATABASE_URL:
+
+1. Open your PostgreSQL service → confirm status is Available (not suspended).
+2. Copy the connection string:
+   - Prefer "Internal Database URL" when the API is also on Render (same region).
+   - Or use "External Database URL" and keep ?sslmode=require.
+3. EdiMartApi → Environment → set DATABASE_URL to that value
+   (or use "Add from database" so Render keeps it linked).
+4. Settings → Start Command must be: npm start   (not yarn start)
+5. Manual Deploy.
+
+The Prisma "package.json#prisma is deprecated" line is only a warning — ignore it.
+================================================================================
+`);
+};
+
 const applyMigrations = () => {
   console.log("Applying database migrations (prisma migrate deploy)...");
   const first = runCapture(`${prismaCli} migrate deploy`);
   if (first.ok) {
     return;
+  }
+
+  if (first.output.includes("P1001") || first.output.includes("Can't reach database server")) {
+    printDatabaseUnreachableHelp(first.output);
+    process.exit(1);
   }
 
   const needsRecovery =
@@ -146,6 +173,10 @@ const applyMigrations = () => {
     const second = runCapture(`${prismaCli} migrate deploy`);
     if (second.ok) {
       return;
+    }
+    if (second.output.includes("P1001") || second.output.includes("Can't reach database server")) {
+      printDatabaseUnreachableHelp(second.output);
+      process.exit(1);
     }
     console.error("prisma migrate deploy failed after recovery:\n", second.output);
     process.exit(1);

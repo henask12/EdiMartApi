@@ -1,5 +1,10 @@
 # Render Blueprint — EdiMart API
 # Dashboard override: Root Directory must be empty (repo root), NOT "src".
+# Start Command must be npm start (never yarn).
+
+databases:
+  - name: edimart-db
+    plan: free
 
 services:
   - type: web
@@ -7,11 +12,15 @@ services:
     runtime: node
     plan: free
     rootDir: .
-    buildCommand: bash build.sh
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_VERSION
         value: "20"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: edimart-db
+          property: connectionString
       - key: WEB_ORIGIN
         sync: false
       - key: JWT_SECRET

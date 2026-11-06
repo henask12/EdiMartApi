@@ -25,12 +25,20 @@ Open **Settings** and set exactly:
 
 ## Environment variables
 
-- `DATABASE_URL` — from Render Postgres (External URL) or your DB host
+- `DATABASE_URL` — **must** point at a live Render Postgres (link the DB, or paste Internal/External URL).  
+  `P1001 Can't reach database server at dpg-…` means this value is wrong or the DB is suspended — fix it in the dashboard, not in git.
 - `JWT_SECRET` — long random string
 - `WEB_ORIGIN` — `https://edi-mart-client.vercel.app`
 - `PUBLIC_API_URL` — `https://edimartapi-1.onrender.com`
 - `SETUP_SECRET` — for one-time `POST /setup/seed`
 - `UPLOAD_DIR` — `./uploads`
+
+### P1001 checklist
+
+1. Postgres service status = **Available**
+2. API **Environment** → `DATABASE_URL` = current Internal (or External + `sslmode=require`) URL from that Postgres
+3. **Start Command** = `npm start` (not `yarn start`)
+4. Manual Deploy
 
 ## Database
 
