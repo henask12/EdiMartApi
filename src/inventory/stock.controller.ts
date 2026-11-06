@@ -1,43 +1,50 @@
 import { Body, Controller, Get, Param, Post, Query, Req, Res } from "@nestjs/common";
-import { MovementType } from "@prisma/client";
-import { OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
+import { MovementType, PermissionKey } from "@prisma/client";
+import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import type { Response } from "express";
-import { IsOptional, IsString } from "class-validator";
-import { Roles } from "../common/decorators/roles.decorator";
+import { IsArray, IsOptional, IsString, ValidateNested } from "class-validator";
+import { Type } from "class-transformer";
 import { parseExportFormat, sendExport } from "../export/export-response.util";
 import { InventoryService } from "./inventory.service";
+import { viewerFor } from "../permissions/access";
+import type { Actor } from "../permissions/permissions.service";
 
 class ReceiveStockDto {
-  @IsString()
-  productId!: string;
-
-  @IsString()
-  quantity!: string;
-
-  @IsString()
-  unitCost!: string;
-
-  @IsOptional()
-  @IsString()
-  expiryDate?: string;
-
-  @IsOptional()
-  @IsString()
-  notes?: string;
+  @IsString() productId!: string;
+  @IsString() quantity!: string;
+  @IsString() unitCost!: string;
+  @IsOptional() @IsString() expiryDate?: string;
+  @IsOptional() @IsString() locationId?: string;
+  @IsOptional() @IsString() lotNumber?: string;
+  @IsOptional() @IsString() notes?: string;
 }
 
-type Authed = { user: { userId: string } };
+class ReceiveBatchDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ReceiveStockDto)
+  lines!: ReceiveStockDto[];
+}
+
+type Authed = { user: Actor };
 
 @Controller("stock")
 export class StockController {
   constructor(private readonly inventory: InventoryService) {}
 
-  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.STOCK_RECEIVE)
   @Post("receive")
   receive(@Req() req: Authed, @Body() body: ReceiveStockDto) {
     return this.inventory.receiveGoods(req.user.userId, body);
   }
 
+  @RequirePermissions(PermissionKey.STOCK_RECEIVE)
+  @Post("receive-batch")
+  receiveBatch(@Req() req: Authed, @Body() body: ReceiveBatchDto) {
+    return this.inventory.receiveBatch(req.user.userId, body.lines);
+  }
+
+  @RequirePermissions(PermissionKey.STOCK_HISTORY_VIEW)
   @Get("history/export")
   async exportHistory(
     @Res() res: Response,
@@ -56,13 +63,16 @@ export class StockController {
     sendExport(res, result);
   }
 
+  @RequirePermissions(PermissionKey.STOCK_HISTORY_VIEW)
   @Get("history/:id")
-  getMovement(@Param("id") id: string) {
-    return this.inventory.getMovement(id);
+  getMovement(@Req() req: Authed, @Param("id") id: string) {
+    return this.inventory.getMovement(id, viewerFor(req.user).includeCost);
   }
 
+  @RequirePermissions(PermissionKey.STOCK_HISTORY_VIEW)
   @Get("history")
   history(
+    @Req() req: Authed,
     @Query("productId") productId?: string,
     @Query("type") type?: MovementType,
     @Query("from") from?: string,
@@ -70,25 +80,34 @@ export class StockController {
     @Query("skip") skip?: string,
     @Query("take") take?: string,
   ) {
-    return this.inventory.listMovements({
-      productId,
-      type,
-      from,
-      to,
-      skip: skip ? Number(skip) : undefined,
-      take: take ? Number(take) : undefined,
-    });
+    return this.inventory.listMovements(
+      {
+        productId,
+        type,
+        from,
+        to,
+        skip: skip ? Number(skip) : undefined,
+        take: take ? Number(take) : undefined,
+      },
+      viewerFor(req.user).includeCost,
+    );
   }
 
+  @RequirePermissions(PermissionKey.STOCK_HISTORY_VIEW)
   @Get("batches")
   batches(
+    @Req() req: Authed,
     @Query("productId") productId: string,
     @Query("skip") skip?: string,
     @Query("take") take?: string,
   ) {
-    return this.inventory.listBatches(productId, {
-      skip: skip ? Number(skip) : undefined,
-      take: take ? Number(take) : undefined,
-    });
+    return this.inventory.listBatches(
+      productId,
+      {
+        skip: skip ? Number(skip) : undefined,
+        take: take ? Number(take) : undefined,
+      },
+      viewerFor(req.user).includeCost,
+    );
   }
 }

@@ -31,6 +31,38 @@ enum PermissionKey {
   ROLES_MANAGE
   SETTINGS_EMAILS
   REPORTING_VIEW
+  // Phase 1 additions (see src/permissions/permission-catalog.ts)
+  SALES_VIEW_OWN
+  SALES_VIEW_ALL
+  SALES_VOID
+  SALES_REFUND
+  DISCOUNT_APPLY
+  DISCOUNT_ABOVE_LIMIT
+  PRICE_OVERRIDE
+  CASH_DRAWER_OPEN
+  SHIFT_MANAGE
+  SHIFT_VIEW_ALL
+  CUSTOMERS_VIEW
+  CUSTOMERS_MANAGE
+  CUSTOMER_CREDIT_MANAGE
+  PROMOTIONS_MANAGE
+  SUPPLIERS_MANAGE
+  PURCHASING_MANAGE
+  PURCHASE_APPROVE
+  SUPPLIER_PAYMENTS_MANAGE
+  STOCK_VIEW
+  STOCK_COUNT
+  STOCK_COUNT_APPROVE
+  STOCK_ADJUST
+  STOCK_TRANSFER
+  STOCK_WRITE_OFF
+  PRICES_MANAGE
+  LOCATIONS_MANAGE
+  LABELS_PRINT
+  REPORTS_VIEW_COST_PROFIT
+  EXPORTS_RUN
+  SETTINGS_MANAGE
+  AUDIT_VIEW
 }
 
 enum ReservationStatus {
@@ -49,12 +81,65 @@ enum MovementType {
   RESERVE
   RELEASE_RESERVE
   DAMAGE
+  WRITE_OFF
+  COUNT
+  SUPPLIER_RETURN
+}
+
+enum TaxCategory {
+  STANDARD
+  ZERO_RATED
+  EXEMPT
+}
+
+enum AdjustReason {
+  DAMAGED
+  EXPIRED
+  THEFT_LOSS
+  INTERNAL_USE
+  GIFT_SAMPLE
+  DATA_CORRECTION
+  OTHER
+}
+
+enum TransferStatus {
+  DRAFT
+  SENT
+  RECEIVED
+  CANCELLED
+}
+
+enum StockCountType {
+  FULL
+  CYCLE
+}
+
+enum StockCountStatus {
+  DRAFT
+  IN_PROGRESS
+  REVIEW
+  POSTED
+  CANCELLED
+}
+
+enum LabelJobStatus {
+  PENDING
+  PRINTED
+  CANCELLED
+}
+
+enum BarcodeKind {
+  EAN13
+  CODE128
+  INTERNAL
+  OTHER
 }
 
 enum NotificationType {
   LOW_STOCK
   OUT_OF_STOCK
   EXPIRY
+  SHIFT_EOD
 }
 
 model Role {
@@ -80,6 +165,15 @@ model User {
   passwordHash    String
   displayName     String?
   isActive        Boolean          @default(true)
+  mustChangePassword Boolean       @default(false)
+  /// bcrypt hash of the optional 4-6 digit manager approval PIN.
+  pinHash            String?
+  pinFailedAttempts  Int           @default(0)
+  pinLockedUntil     DateTime?
+  locale             String?
+  /// Base32 TOTP secret when 2FA is enabled (Phase 9). Never returned in API responses.
+  totpSecret         String?
+  totpEnabled        Boolean          @default(false)
   roleId          String
   role            Role             @relation(fields: [roleId], references: [id])
   createdAt       DateTime         @default(now())
@@ -87,9 +181,35 @@ model User {
   auditLogs       AuditLog[]
   stockMovements  StockMovement[]
   sales           Sale[]           @relation("SaleCreatedBy")
-  stockBatches    StockBatch[]
-  reservations    Reservation[]
-  expenses        Expense[]         @relation("ExpenseCreatedBy")
+  salesVoided     Sale[]           @relation("SaleVoidedBy")
+  paymentsTaken   PaymentAllocation[] @relation("PaymentTakenBy")
+  stockBatches       StockBatch[]
+  reservations       Reservation[]
+  stockTransfers     StockTransfer[]      @relation("TransferCreatedBy")
+  stockTransferRecv  StockTransfer[]      @relation("TransferReceivedBy")
+  stockCounts        StockCount[]         @relation("CountCreatedBy")
+  stockCountsPosted  StockCount[]         @relation("CountPostedBy")
+  priceChanges       PriceChange[]
+  parkedCarts        ParkedCart[]
+  creditNotes        CreditNote[]         @relation("CreditNoteCreatedBy")
+  shiftsOpened       Shift[]              @relation("ShiftOpenedBy")
+  shiftsClosed       Shift[]              @relation("ShiftClosedBy")
+  cashMovements      CashMovement[]
+  registersCreated   Register[]           @relation("RegisterCreatedBy")
+  suppliersCreated   Supplier[]           @relation("SupplierCreatedBy")
+  purchaseOrders     PurchaseOrder[]      @relation("PoCreatedBy")
+  purchaseOrdersApproved PurchaseOrder[]  @relation("PoApprovedBy")
+  goodsReceipts      GoodsReceipt[]       @relation("GrCreatedBy")
+  supplierBills      SupplierBill[]       @relation("BillCreatedBy")
+  supplierPayments   SupplierPayment[]    @relation("PaymentCreatedBy")
+  supplierReturns    SupplierReturn[]     @relation("SupplierReturnCreatedBy")
+  customersCreated   Customer[]           @relation("CustomerCreatedBy")
+  customerLedger     CustomerLedgerEntry[] @relation("CustomerLedgerCreatedBy")
+  loyaltyTxns        LoyaltyTransaction[] @relation("LoyaltyTxnCreatedBy")
+  promotionsCreated  Promotion[]          @relation("PromotionCreatedBy")
+  sessions           AuthSession[]
+  syncConflictsResolved SyncConflict[]    @relation("SyncConflictResolvedBy")
+  expenses           Expense[]            @relation("ExpenseCreatedBy")
 }
 
 model AuditLog {
@@ -107,10 +227,11 @@ model AuditLog {
 }
 
 model Category {
-  id        String    @id @default(cuid())
-  name      String    @unique
-  products  Product[]
-  createdAt DateTime  @default(now())
+  id          String      @id @default(cuid())
+  name        String      @unique
+  products    Product[]
+  promotions  Promotion[]
+  createdAt   DateTime    @default(now())
 }
 
 model ProductType {
@@ -124,6 +245,9 @@ model Product {
   id            String            @id @default(cuid())
   sku           String?           @unique
   name          String
+  /// Amharic display name (optional).
+  nameAm        String?
+  brand         String?
   categoryId    String
   category      Category          @relation(fields: [categoryId], references: [id])
   productTypeId String?
@@ -133,10 +257,22 @@ model Product {
   originCountry   String?
   sellingPrice    Decimal           @db.Decimal(12, 2)
   costPrice     Decimal           @db.Decimal(12, 2) @default(0)
+  /// Reorder point (alert when available falls to or below this).
   restockAt     Int               @default(0)
+  /// Suggested reorder quantity.
   restockQty    Int               @default(0)
+  minStock      Int               @default(0)
+  maxStock      Int               @default(0)
+  leadTimeDays  Int               @default(0)
+  taxCategory   TaxCategory       @default(STANDARD)
+  /// When true, receiving should capture lot/expiry; sales use FEFO and record batch links.
+  trackBatches  Boolean           @default(false)
+  defaultLocationId String?
+  defaultLocation   Location?     @relation("ProductDefaultLocation", fields: [defaultLocationId], references: [id])
   expiryDate    DateTime?
   isActive      Boolean           @default(true)
+  /// Soft-archive: products with history are never deleted.
+  archivedAt    DateTime?
   lastOutOfStockAlertAt DateTime?
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
@@ -144,16 +280,62 @@ model Product {
   saleLines     SaleLine[]
   stockBatches  StockBatch[]
   reservations  Reservation[]
+  barcodes      ProductBarcode[]
+  priceChanges  PriceChange[]
+  labelJobs     LabelReprintQueue[]
+  transferLines StockTransferLine[]
+  countLines    StockCountLine[]
+  snapshots     InventorySnapshot[]
+  creditNoteLines CreditNoteLine[]
+  supplierProducts SupplierProduct[]
+  purchaseOrderLines PurchaseOrderLine[]
+  goodsReceiptLines GoodsReceiptLine[]
+  supplierCostHistory SupplierCostHistory[]
+  supplierReturnLines SupplierReturnLine[]
+  promotions          Promotion[]
+  dailyProductSales   DailyProductSales[]
 
   @@unique([categoryId, name])
+  @@index([expiryDate])
+  @@index([brand])
+  @@index([archivedAt])
+}
+
+model ProductBarcode {
+  id        String      @id @default(cuid())
+  productId String
+  product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  barcode   String      @unique
+  kind      BarcodeKind @default(INTERNAL)
+  isPrimary Boolean     @default(false)
+  createdAt DateTime    @default(now())
+
+  @@index([productId])
 }
 
 model Location {
   id             String          @id @default(cuid())
   code           String          @unique
   name           String
+  /// Groups locations into a physical shop; second store later = new storeCode.
+  storeCode      String          @default("DEFAULT_STORE")
+  sellable       Boolean         @default(true)
+  sortOrder      Int             @default(0)
+  binCode        String?
+  isActive       Boolean         @default(true)
   inventoryItems InventoryItem[]
+  stockBatches   StockBatch[]
+  transfersFrom  StockTransfer[] @relation("TransferFrom")
+  transfersTo    StockTransfer[] @relation("TransferTo")
+  stockCounts    StockCount[]
+  defaultForProducts Product[]   @relation("ProductDefaultLocation")
+  snapshots      InventorySnapshot[]
+  creditRestocks CreditNoteLine[]
+  goodsReceiptLines GoodsReceiptLine[]
+  supplierReturnLines SupplierReturnLine[]
   createdAt      DateTime        @default(now())
+
+  @@index([storeCode, sellable])
 }
 
 model InventoryItem {
@@ -175,6 +357,10 @@ model StockBatch {
   id                String          @id @default(cuid())
   productId         String
   product           Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Location this batch currently sits in (set on receive / transfer).
+  locationId        String?
+  location          Location?       @relation(fields: [locationId], references: [id])
+  lotNumber         String?
   qtyReceived       Decimal         @db.Decimal(18, 4)
   qtyRemaining      Decimal         @db.Decimal(18, 4)
   unitCost          Decimal         @db.Decimal(14, 4) @default(0)
@@ -183,32 +369,37 @@ model StockBatch {
   receivedByUserId  String?
   receivedBy        User?           @relation(fields: [receivedByUserId], references: [id])
   stockMovements    StockMovement[]
+  saleLineBatches   SaleLineBatch[]
 
   @@index([productId, receivedAt])
   @@index([expiryDate])
+  @@index([locationId, productId])
+  @@index([lotNumber])
 }
 
 model StockMovement {
-  id              String        @id @default(cuid())
+  id              String         @id @default(cuid())
   inventoryItemId String
-  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+  inventoryItem   InventoryItem  @relation(fields: [inventoryItemId], references: [id])
   stockBatchId    String?
-  stockBatch      StockBatch?   @relation(fields: [stockBatchId], references: [id])
+  stockBatch      StockBatch?    @relation(fields: [stockBatchId], references: [id])
   type            MovementType
-  qtyDelta        Decimal       @db.Decimal(18, 4)
-  unitCost        Decimal?      @db.Decimal(14, 4)
-  beforeOnHand    Decimal?      @db.Decimal(18, 4)
-  afterOnHand     Decimal?      @db.Decimal(18, 4)
+  qtyDelta        Decimal        @db.Decimal(18, 4)
+  unitCost        Decimal?       @db.Decimal(14, 4)
+  beforeOnHand    Decimal?       @db.Decimal(18, 4)
+  afterOnHand     Decimal?       @db.Decimal(18, 4)
+  reasonCode      AdjustReason?
   refType         String?
   refId           String?
   notes           String?
   metadata        Json?
   createdByUserId String?
-  createdBy       User?         @relation(fields: [createdByUserId], references: [id])
-  createdAt       DateTime      @default(now())
+  createdBy       User?          @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime       @default(now())
 
   @@index([inventoryItemId, createdAt])
   @@index([refType, refId])
+  @@index([reasonCode])
 }
 
 model Reservation {
@@ -216,36 +407,79 @@ model Reservation {
   productId       String
   product         Product           @relation(fields: [productId], references: [id])
   quantity        Decimal           @db.Decimal(18, 4)
-  status             ReservationStatus @default(RESERVED)
-  customerName       String?
-  reservedDate       DateTime          @default(now())
-  expiresAt          DateTime?
+  status          ReservationStatus @default(RESERVED)
+  customerName    String?
+  /// Optional linked customer for layaway / reminders (Phase 7).
+  customerId      String?
+  customer        Customer?         @relation(fields: [customerId], references: [id])
+  /// Agreed layaway total (retail); null = classic free reservation.
+  totalPrice      Decimal?          @db.Decimal(12, 2)
+  depositPaid     Decimal           @db.Decimal(12, 2) @default(0)
+  reservedDate    DateTime          @default(now())
+  expiresAt       DateTime?
   reservationEndDate DateTime?
-  createdByUserId    String
+  createdByUserId String
   createdBy       User              @relation(fields: [createdByUserId], references: [id])
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
   @@index([productId, status])
   @@index([status])
+  @@index([status, expiresAt])
+  @@index([customerId])
 }
 
 model Sale {
   id              String                @id @default(cuid())
   saleNumber      String                @unique
+  /// COMPLETED | PARTIALLY_REFUNDED | REFUNDED | VOIDED
   status          String                @default("COMPLETED")
   subtotal        Decimal               @db.Decimal(12, 2)
   discountTotal   Decimal               @db.Decimal(12, 2) @default(0)
   taxTotal        Decimal               @db.Decimal(12, 2) @default(0)
   grandTotal      Decimal               @db.Decimal(12, 2)
+  /// Cashier note on the sale (distinct from movement notes).
+  notes           String?
+  /// Cart-level discount reason code when discountTotal > 0.
+  discountReason  String?
+  /// NONE | PENDING | REGISTERED | FAILED — FiscalService fills later.
+  fiscalStatus    String                @default("NONE")
+  fiscalRegistrationNumber String?
+  fiscalQrPayload String?
+  voidedAt        DateTime?
+  voidReason      String?
+  voidedByUserId  String?
+  voidedBy        User?                 @relation("SaleVoidedBy", fields: [voidedByUserId], references: [id])
+  /// Optional link to the open shift when the sale was taken (Phase 5).
+  shiftId         String?
+  shift           Shift?                @relation(fields: [shiftId], references: [id])
+  /// Optional customer on the sale (Phase 7).
+  customerId      String?
+  customer        Customer?             @relation(fields: [customerId], references: [id])
+  loyaltyPointsEarned   Int             @default(0)
+  loyaltyPointsRedeemed Int             @default(0)
+  /// Client-generated UUID for offline/outbox sales (Phase 9); unique when set.
+  clientSaleId    String?               @unique
+  /// Register code embedded in offline sale numbers (e.g. REGISTER-1).
+  registerCode    String?
+  /// true when created from an offline sync.
+  createdOffline  Boolean               @default(false)
   createdByUserId String
   createdBy       User                  @relation("SaleCreatedBy", fields: [createdByUserId], references: [id])
   createdAt       DateTime              @default(now())
   lines           SaleLine[]
   payments        PaymentAllocation[]
   attachments     SaleAttachment[]
+  creditNotes     CreditNote[]
+  promotionUsages PromotionUsage[]
+  ledgerEntries   CustomerLedgerEntry[]
+  loyaltyTxns     LoyaltyTransaction[]
 
   @@index([createdAt])
+  @@index([status, createdAt])
+  @@index([createdByUserId, createdAt])
+  @@index([shiftId])
+  @@index([customerId])
 }
 
 model SaleAttachment {
@@ -266,16 +500,43 @@ model SaleLine {
   product      Product  @relation(fields: [productId], references: [id])
   quantity       Decimal  @db.Decimal(18, 4)
   unitPrice      Decimal  @db.Decimal(12, 2)
+  /// Shelf price before an override (null when unitPrice was not overridden).
+  originalUnitPrice Decimal? @db.Decimal(12, 2)
+  priceOverridden Boolean @default(false)
   unitCostAtSale Decimal  @db.Decimal(14, 4) @default(0)
   lineDiscount   Decimal  @db.Decimal(12, 2) @default(0)
+  discountReason String?
   taxAmount    Decimal  @db.Decimal(12, 2) @default(0)
   lineTotal    Decimal  @db.Decimal(12, 2)
+  batchAllocations SaleLineBatch[]
+  creditLines  CreditNoteLine[]
+}
+
+/// FEFO batch allocations for a sale line (traceability).
+model SaleLineBatch {
+  id           String     @id @default(cuid())
+  saleLineId   String
+  saleLine     SaleLine   @relation(fields: [saleLineId], references: [id], onDelete: Cascade)
+  stockBatchId String?
+  stockBatch   StockBatch? @relation(fields: [stockBatchId], references: [id])
+  quantity     Decimal    @db.Decimal(18, 4)
+
+  @@index([saleLineId])
+  @@index([stockBatchId])
 }
 
 enum PaymentMethod {
   CASH
   CARD
   MOBILE_MONEY
+  TELEBIRR
+  CBE_BIRR
+  MPESA
+  BANK_TRANSFER
+  /// Redeem customer store credit balance at POS (Phase 7).
+  STORE_CREDIT
+  /// Charge to customer pay-later account (Phase 7).
+  CUSTOMER_ACCOUNT
 }
 
 model PaymentAllocation {
@@ -284,6 +545,81 @@ model PaymentAllocation {
   sale   Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
   method PaymentMethod
   amount Decimal       @db.Decimal(12, 2)
+  reference String?
+  /// Cash tendered (may exceed amount); change = tendered − amount for CASH.
+  tenderedAmount Decimal? @db.Decimal(12, 2)
+  changeAmount   Decimal? @db.Decimal(12, 2)
+  proofImagePath String?
+  createdByUserId String?
+  createdBy       User?   @relation("PaymentTakenBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+}
+
+enum CreditCondition {
+  RESTOCK
+  DAMAGED
+  NEEDS_INSPECTION
+}
+
+/// Linked credit document for void or return; original Sale is never edited away.
+model CreditNote {
+  id              String          @id @default(cuid())
+  creditNumber    String          @unique
+  saleId          String
+  sale            Sale            @relation(fields: [saleId], references: [id])
+  /// VOID | RETURN | EXCHANGE
+  kind            String
+  reason          String
+  condition       CreditCondition @default(RESTOCK)
+  refundMethod    PaymentMethod?
+  refundAmount    Decimal         @db.Decimal(12, 2)
+  refundReference String?
+  notes           String?
+  createdByUserId String
+  createdBy       User            @relation("CreditNoteCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime        @default(now())
+  lines           CreditNoteLine[]
+  ledgerEntries   CustomerLedgerEntry[]
+
+  @@index([saleId])
+  @@index([createdAt])
+}
+
+model CreditNoteLine {
+  id            String      @id @default(cuid())
+  creditNoteId  String
+  creditNote    CreditNote  @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  saleLineId    String
+  saleLine      SaleLine    @relation(fields: [saleLineId], references: [id])
+  productId     String
+  product       Product     @relation(fields: [productId], references: [id])
+  quantity      Decimal     @db.Decimal(18, 4)
+  unitPrice     Decimal     @db.Decimal(12, 2)
+  lineTotal     Decimal     @db.Decimal(12, 2)
+  /// Where returned stock was put (sellable or quarantine).
+  restockLocationId String?
+  restockLocation   Location? @relation(fields: [restockLocationId], references: [id])
+
+  @@index([creditNoteId])
+  @@index([saleLineId])
+  @@index([productId])
+}
+
+/// Parked POS cart; expires at end of business day (Africa/Addis_Ababa).
+model ParkedCart {
+  id              String   @id @default(cuid())
+  label           String
+  notes           String?
+  /// JSON snapshot of cart lines + discounts for resume.
+  payload         Json
+  createdByUserId String
+  createdBy       User     @relation(fields: [createdByUserId], references: [id])
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  resumedAt       DateTime?
+
+  @@index([createdByUserId, createdAt])
+  @@index([expiresAt])
 }
 
 model NotificationEmail {
@@ -313,4 +649,782 @@ model Expense {
   updatedAt       DateTime  @updatedAt
 
   @@index([expenseDate])
+}
+
+/// Per-scope, per-business-day counters (sale numbers, and later returns, POs, shifts).
+model DocumentCounter {
+  scope String
+  /// Business-time calendar date, YYYY-MM-DD (Africa/Addis_Ababa).
+  date  String
+  value Int    @default(0)
+
+  @@id([scope, date])
+}
+
+/// Makes retried write requests (checkout) safe: the same key returns the original result.
+model IdempotencyKey {
+  id          String   @id @default(cuid())
+  scope       String
+  key         String
+  requestHash String
+  userId      String
+  saleId      String?
+  createdAt   DateTime @default(now())
+
+  @@unique([scope, key])
+  @@index([createdAt])
+}
+
+/// A manager's PIN approval of one sensitive action. The token is shown once; only its hash is
+/// stored. Single use, short lived, bound to one action and one requesting user.
+model Approval {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique
+  action      String
+  approverId  String
+  requesterId String
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([expiresAt])
+}
+
+/// Owner-editable shop settings (key/value). Known keys and defaults live in code.
+model StoreSetting {
+  key             String   @id
+  value           Json
+  updatedAt       DateTime @updatedAt
+  updatedByUserId String?
+}
+
+model StockTransfer {
+  id              String         @id @default(cuid())
+  transferNumber  String         @unique
+  status          TransferStatus @default(DRAFT)
+  fromLocationId  String
+  fromLocation    Location       @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocationId    String
+  toLocation      Location       @relation("TransferTo", fields: [toLocationId], references: [id])
+  notes           String?
+  createdByUserId String
+  createdBy       User           @relation("TransferCreatedBy", fields: [createdByUserId], references: [id])
+  receivedByUserId String?
+  receivedBy      User?          @relation("TransferReceivedBy", fields: [receivedByUserId], references: [id])
+  sentAt          DateTime?
+  receivedAt      DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  lines           StockTransferLine[]
+
+  @@index([status, createdAt])
+  @@index([fromLocationId])
+  @@index([toLocationId])
+}
+
+model StockTransferLine {
+  id         String        @id @default(cuid())
+  transferId String
+  transfer   StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product       @relation(fields: [productId], references: [id])
+  quantity   Decimal       @db.Decimal(18, 4)
+  /// Optional preferred batch to move; otherwise FEFO at send time.
+  stockBatchId String?
+
+  @@index([transferId])
+  @@index([productId])
+}
+
+model StockCount {
+  id              String           @id @default(cuid())
+  countNumber     String           @unique
+  type            StockCountType   @default(FULL)
+  status          StockCountStatus @default(DRAFT)
+  locationId      String?
+  location        Location?        @relation(fields: [locationId], references: [id])
+  notes           String?
+  startedAt       DateTime?
+  postedAt        DateTime?
+  createdByUserId String
+  createdBy       User             @relation("CountCreatedBy", fields: [createdByUserId], references: [id])
+  postedByUserId  String?
+  postedBy        User?            @relation("CountPostedBy", fields: [postedByUserId], references: [id])
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  lines           StockCountLine[]
+
+  @@index([status, createdAt])
+  @@index([locationId])
+}
+
+model StockCountLine {
+  id                 String     @id @default(cuid())
+  countId            String
+  count              StockCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  productId          String
+  product            Product    @relation(fields: [productId], references: [id])
+  /// System on-hand at count start (so sales during count can be reconciled).
+  systemQtySnapshot  Decimal    @db.Decimal(18, 4)
+  countedQty         Decimal?   @db.Decimal(18, 4)
+  /// Set when posting: counted − (snapshot + movements since start).
+  varianceQty        Decimal?   @db.Decimal(18, 4)
+  needsRecount       Boolean    @default(false)
+  notes              String?
+
+  @@unique([countId, productId])
+  @@index([productId])
+}
+
+model PriceChange {
+  id              String   @id @default(cuid())
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  oldPrice        Decimal  @db.Decimal(12, 2)
+  newPrice        Decimal  @db.Decimal(12, 2)
+  effectiveAt     DateTime @default(now())
+  createdByUserId String?
+  createdBy       User?    @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+  note            String?
+
+  @@index([productId, effectiveAt])
+  @@index([effectiveAt])
+}
+
+model LabelReprintQueue {
+  id        String         @id @default(cuid())
+  productId String
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  reason    String
+  status    LabelJobStatus @default(PENDING)
+  createdAt DateTime       @default(now())
+  printedAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([productId])
+}
+
+/// Daily quantity/value snapshot per product×location for fast history charts.
+model InventorySnapshot {
+  id            String   @id @default(cuid())
+  /// Business-time calendar date YYYY-MM-DD (Africa/Addis_Ababa).
+  date          String
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  locationId    String
+  location      Location @relation(fields: [locationId], references: [id])
+  quantity      Decimal  @db.Decimal(18, 4)
+  valueAtCost   Decimal  @db.Decimal(14, 2)
+  valueAtRetail Decimal  @db.Decimal(14, 2)
+  createdAt     DateTime @default(now())
+
+  @@unique([date, productId, locationId])
+  @@index([date])
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum CashMovementType {
+  CASH_IN
+  CASH_OUT
+  NO_SALE_OPEN
+}
+
+enum ShiftCountKind {
+  OPENING
+  CLOSING
+}
+
+/// Physical till / register. One default till for this shop (Phase 5).
+model Register {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String
+  storeCode       String   @default("DEFAULT_STORE")
+  isActive        Boolean  @default(true)
+  /// Optional device fingerprint cookie value that marks this browser as "registered".
+  deviceTokenHint String?
+  createdByUserId String?
+  createdBy       User?    @relation("RegisterCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  shifts          Shift[]
+
+  @@index([storeCode, isActive])
+}
+
+model Shift {
+  id               String      @id @default(cuid())
+  shiftNumber      String      @unique
+  status           ShiftStatus @default(OPEN)
+  registerId       String
+  register         Register    @relation(fields: [registerId], references: [id])
+  openedByUserId   String
+  openedBy         User        @relation("ShiftOpenedBy", fields: [openedByUserId], references: [id])
+  closedByUserId   String?
+  closedBy         User?       @relation("ShiftClosedBy", fields: [closedByUserId], references: [id])
+  openedAt         DateTime    @default(now())
+  closedAt         DateTime?
+  openingFloat     Decimal     @db.Decimal(12, 2) @default(0)
+  /// Expected cash in drawer at close (computed); null until closed.
+  expectedCash     Decimal?    @db.Decimal(12, 2)
+  /// Blind counted cash at close.
+  countedCash      Decimal?    @db.Decimal(12, 2)
+  variance         Decimal?    @db.Decimal(12, 2)
+  varianceApprovedByUserId String?
+  notes            String?
+  sales            Sale[]
+  cashMovements    CashMovement[]
+  counts           ShiftCount[]
+
+  @@index([status, openedAt])
+  @@index([registerId, status])
+  @@index([openedByUserId, openedAt])
+}
+
+model CashMovement {
+  id              String           @id @default(cuid())
+  shiftId         String
+  shift           Shift            @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  type            CashMovementType
+  amount          Decimal          @db.Decimal(12, 2)
+  reason          String?
+  createdByUserId String
+  createdBy       User             @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime         @default(now())
+
+  @@index([shiftId, createdAt])
+}
+
+/// Denomination lines for opening or closing count (blind count stores CLOSING before reveal).
+model ShiftCount {
+  id          String         @id @default(cuid())
+  shiftId     String
+  shift       Shift          @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  kind        ShiftCountKind
+  /// JSON map of denomination → quantity, e.g. {"50":2,"100":5}.
+  denominations Json
+  total       Decimal        @db.Decimal(12, 2)
+  createdAt   DateTime       @default(now())
+
+  @@index([shiftId, kind])
+}
+
+// ─── Phase 6: Purchasing ─────────────────────────────────────────────────────
+
+enum PurchaseOrderStatus {
+  DRAFT
+  APPROVED
+  SENT
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CLOSED
+  CANCELLED
+}
+
+enum SupplierBillStatus {
+  OPEN
+  PARTIAL
+  PAID
+  VOID
+}
+
+enum SupplierReturnStatus {
+  DRAFT
+  SENT
+  COMPLETED
+  CANCELLED
+}
+
+model Supplier {
+  id              String   @id @default(cuid())
+  name            String
+  contactName     String?
+  phone           String?
+  telegram        String?
+  email           String?
+  address         String?
+  tin             String?
+  paymentTerms    String?
+  leadTimeDays    Int      @default(7)
+  minimumOrder    Decimal  @db.Decimal(12, 2) @default(0)
+  /// ETB only in Phase 6 (no multi-currency).
+  currency        String   @default("ETB")
+  notes           String?
+  isActive        Boolean  @default(true)
+  createdByUserId String?
+  createdBy       User?    @relation("SupplierCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  products        SupplierProduct[]
+  purchaseOrders  PurchaseOrder[]
+  bills           SupplierBill[]
+  returns         SupplierReturn[]
+  costHistory     SupplierCostHistory[]
+
+  @@index([isActive, name])
+}
+
+model SupplierProduct {
+  id              String   @id @default(cuid())
+  supplierId      String
+  supplier        Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  supplierSku     String?
+  /// Pack size in base sell units (Phase 6: always 1 — no carton conversion yet).
+  packSize        Int      @default(1)
+  lastCost        Decimal  @db.Decimal(14, 4) @default(0)
+  isPreferred     Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([supplierId, productId])
+  @@index([productId])
+}
+
+model SupplierCostHistory {
+  id         String   @id @default(cuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  unitCost   Decimal  @db.Decimal(14, 4)
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([supplierId, productId, createdAt])
+}
+
+model PurchaseOrder {
+  id               String              @id @default(cuid())
+  poNumber         String              @unique
+  status           PurchaseOrderStatus @default(DRAFT)
+  supplierId       String
+  supplier         Supplier            @relation(fields: [supplierId], references: [id])
+  notes            String?
+  expectedAt       DateTime?
+  subtotal         Decimal             @db.Decimal(12, 2) @default(0)
+  createdByUserId  String
+  createdBy        User                @relation("PoCreatedBy", fields: [createdByUserId], references: [id])
+  approvedByUserId String?
+  approvedBy       User?               @relation("PoApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedAt       DateTime?
+  sentAt           DateTime?
+  closedAt         DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  lines            PurchaseOrderLine[]
+  receipts         GoodsReceipt[]
+  bills            SupplierBill[]
+
+  @@index([status, createdAt])
+  @@index([supplierId, status])
+}
+
+model PurchaseOrderLine {
+  id             String        @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder  PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product       @relation(fields: [productId], references: [id])
+  /// Quantity in base sell units.
+  quantityOrdered Decimal      @db.Decimal(18, 4)
+  quantityReceived Decimal     @db.Decimal(18, 4) @default(0)
+  unitCost       Decimal       @db.Decimal(14, 4)
+  lineTotal      Decimal       @db.Decimal(12, 2)
+
+  @@index([purchaseOrderId])
+  @@index([productId])
+}
+
+model GoodsReceipt {
+  id              String   @id @default(cuid())
+  receiptNumber   String   @unique
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  supplierId      String?
+  notes           String?
+  createdByUserId String
+  createdBy       User     @relation("GrCreatedBy", fields: [createdByUserId], references: [id])
+  receivedAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  lines           GoodsReceiptLine[]
+  landedCosts     LandedCost[]
+  billLinks       SupplierBillReceipt[]
+
+  @@index([purchaseOrderId])
+  @@index([receivedAt])
+}
+
+model GoodsReceiptLine {
+  id             String       @id @default(cuid())
+  goodsReceiptId String
+  goodsReceipt   GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product      @relation(fields: [productId], references: [id])
+  purchaseOrderLineId String?
+  quantity       Decimal      @db.Decimal(18, 4)
+  /// Unit cost before landed-cost spread.
+  unitCost       Decimal      @db.Decimal(14, 4)
+  /// Unit cost after landed-cost spread (null until applied).
+  landedUnitCost Decimal?     @db.Decimal(14, 4)
+  locationId     String
+  location       Location     @relation(fields: [locationId], references: [id])
+  stockBatchId   String?
+  expiryDate     DateTime?
+  lotNumber      String?
+
+  @@index([goodsReceiptId])
+  @@index([productId])
+}
+
+model LandedCost {
+  id             String       @id @default(cuid())
+  goodsReceiptId String
+  goodsReceipt   GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  /// TRANSPORT | CUSTOMS | CLEARING | OTHER
+  kind           String
+  description    String?
+  amount         Decimal      @db.Decimal(12, 2)
+  /// VALUE | QUANTITY
+  allocateBy     String       @default("VALUE")
+  createdAt      DateTime     @default(now())
+
+  @@index([goodsReceiptId])
+}
+
+model SupplierBill {
+  id              String             @id @default(cuid())
+  billNumber      String             @unique
+  supplierId      String
+  supplier        Supplier           @relation(fields: [supplierId], references: [id])
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
+  supplierInvoiceRef String?
+  status          SupplierBillStatus @default(OPEN)
+  amountDue       Decimal            @db.Decimal(12, 2)
+  amountPaid      Decimal            @db.Decimal(12, 2) @default(0)
+  dueDate         DateTime?
+  notes           String?
+  createdByUserId String
+  createdBy       User               @relation("BillCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  receipts        SupplierBillReceipt[]
+  payments        SupplierPayment[]
+
+  @@index([supplierId, status])
+  @@index([dueDate])
+}
+
+model SupplierBillReceipt {
+  id             String       @id @default(cuid())
+  supplierBillId String
+  supplierBill   SupplierBill @relation(fields: [supplierBillId], references: [id], onDelete: Cascade)
+  goodsReceiptId String
+  goodsReceipt   GoodsReceipt @relation(fields: [goodsReceiptId], references: [id])
+
+  @@unique([supplierBillId, goodsReceiptId])
+}
+
+model SupplierPayment {
+  id              String        @id @default(cuid())
+  supplierBillId  String
+  supplierBill    SupplierBill  @relation(fields: [supplierBillId], references: [id], onDelete: Cascade)
+  amount          Decimal       @db.Decimal(12, 2)
+  method          PaymentMethod @default(CASH)
+  reference       String?
+  paidAt          DateTime      @default(now())
+  createdByUserId String
+  createdBy       User          @relation("PaymentCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime      @default(now())
+
+  @@index([supplierBillId])
+}
+
+model SupplierReturn {
+  id              String               @id @default(cuid())
+  returnNumber    String               @unique
+  supplierId      String
+  supplier        Supplier             @relation(fields: [supplierId], references: [id])
+  status          SupplierReturnStatus @default(DRAFT)
+  reason          String?
+  notes           String?
+  createdByUserId String
+  createdBy       User                 @relation("SupplierReturnCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  lines           SupplierReturnLine[]
+
+  @@index([supplierId, status])
+}
+
+model SupplierReturnLine {
+  id               String         @id @default(cuid())
+  supplierReturnId String
+  supplierReturn   SupplierReturn @relation(fields: [supplierReturnId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product        @relation(fields: [productId], references: [id])
+  quantity         Decimal        @db.Decimal(18, 4)
+  unitCost         Decimal        @db.Decimal(14, 4)
+  locationId       String
+  location         Location       @relation(fields: [locationId], references: [id])
+  stockBatchId     String?
+
+  @@index([supplierReturnId])
+  @@index([productId])
+}
+
+// ─── Phase 7: customers, loyalty, promotions ─────────────────────────────────
+
+enum CustomerLedgerKind {
+  SALE_CREDIT
+  REPAYMENT
+  STORE_CREDIT_ISSUE
+  STORE_CREDIT_REDEEM
+  ADJUSTMENT
+}
+
+enum LoyaltyTxnKind {
+  EARN
+  REDEEM
+  ADJUST
+}
+
+enum PromotionType {
+  PERCENT_OFF
+  FIXED_OFF
+  MIN_SPEND_PERCENT
+  MIN_SPEND_FIXED
+}
+
+enum PromotionTarget {
+  ALL
+  PRODUCT
+  CATEGORY
+}
+
+model Customer {
+  id                 String                @id @default(cuid())
+  name               String
+  /// Normalized Ethiopian mobile: +2519… / +2517…
+  phone              String                @unique
+  email              String?
+  birthday           DateTime?             @db.Date
+  notes              String?
+  /// Free-form tags for filtering (e.g. VIP, staff).
+  tags               String[]              @default([])
+  creditLimit        Decimal               @db.Decimal(12, 2) @default(0)
+  /// Amount the customer currently owes (pay later).
+  creditBalance      Decimal               @db.Decimal(12, 2) @default(0)
+  /// Redeemable store credit from returns.
+  storeCreditBalance Decimal               @db.Decimal(12, 2) @default(0)
+  loyaltyPoints      Int                   @default(0)
+  loyaltyTier        String?
+  marketingOptOut    Boolean               @default(false)
+  isActive           Boolean               @default(true)
+  createdByUserId    String?
+  createdBy          User?                 @relation("CustomerCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  sales              Sale[]
+  reservations       Reservation[]
+  ledger             CustomerLedgerEntry[]
+  loyaltyTxns        LoyaltyTransaction[]
+  promotionUsages    PromotionUsage[]
+
+  @@index([name])
+  @@index([isActive, name])
+  @@index([creditBalance])
+}
+
+model CustomerLedgerEntry {
+  id              String             @id @default(cuid())
+  customerId      String
+  customer        Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  kind            CustomerLedgerKind
+  /// Signed amount in Birr (positive increases the tracked balance for that kind).
+  amount          Decimal            @db.Decimal(12, 2)
+  /// creditBalance or storeCreditBalance after this entry, depending on kind.
+  balanceAfter    Decimal            @db.Decimal(12, 2)
+  saleId          String?
+  sale            Sale?              @relation(fields: [saleId], references: [id])
+  creditNoteId    String?
+  creditNote      CreditNote?        @relation(fields: [creditNoteId], references: [id])
+  notes           String?
+  createdByUserId String
+  createdBy       User               @relation("CustomerLedgerCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime           @default(now())
+
+  @@index([customerId, createdAt])
+  @@index([saleId])
+  @@index([kind, createdAt])
+}
+
+model LoyaltyTransaction {
+  id              String         @id @default(cuid())
+  customerId      String
+  customer        Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  kind            LoyaltyTxnKind
+  /// Signed points delta.
+  points          Int
+  balanceAfter    Int
+  saleId          String?
+  sale            Sale?          @relation(fields: [saleId], references: [id])
+  notes           String?
+  createdByUserId String
+  createdBy       User           @relation("LoyaltyTxnCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime       @default(now())
+
+  @@index([customerId, createdAt])
+  @@index([saleId])
+}
+
+model Promotion {
+  id                 String           @id @default(cuid())
+  name               String
+  /// Optional coupon code (case-insensitive match in app).
+  code               String?          @unique
+  type               PromotionType
+  /// Percent (e.g. 10) or fixed Birr off, depending on type.
+  value              Decimal          @db.Decimal(12, 2)
+  minSpend           Decimal?         @db.Decimal(12, 2)
+  target             PromotionTarget  @default(ALL)
+  productId          String?
+  product            Product?         @relation(fields: [productId], references: [id])
+  categoryId         String?
+  category           Category?        @relation(fields: [categoryId], references: [id])
+  startsAt           DateTime?
+  endsAt             DateTime?
+  /// Empty = every day; else 0=Sun … 6=Sat (JS getDay).
+  daysOfWeek         Int[]            @default([])
+  startHour          Int?
+  endHour            Int?
+  priority           Int              @default(0)
+  stackable          Boolean          @default(false)
+  maxUses            Int?
+  maxUsesPerCustomer Int?
+  usageCount         Int              @default(0)
+  isActive           Boolean          @default(true)
+  createdByUserId    String?
+  createdBy          User?            @relation("PromotionCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  usages             PromotionUsage[]
+
+  @@index([isActive, priority])
+  @@index([startsAt, endsAt])
+  @@index([productId])
+  @@index([categoryId])
+}
+
+model PromotionUsage {
+  id             String    @id @default(cuid())
+  promotionId    String
+  promotion      Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  saleId         String
+  sale           Sale      @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  customerId     String?
+  customer       Customer? @relation(fields: [customerId], references: [id])
+  discountAmount Decimal   @db.Decimal(12, 2)
+  createdAt      DateTime  @default(now())
+
+  @@index([promotionId])
+  @@index([saleId])
+  @@index([customerId])
+}
+
+// ─── Phase 8: report summaries ───────────────────────────────────────────────
+
+/// One row per business calendar day (Africa/Addis_Ababa). Cost fields are always stored;
+/// API omits them unless the viewer has REPORTS_VIEW_COST_PROFIT.
+model DailySalesSummary {
+  id              String   @id @default(cuid())
+  /// YYYY-MM-DD in business TZ.
+  businessDate    String   @unique
+  saleCount       Int      @default(0)
+  voidCount       Int      @default(0)
+  returnCount     Int      @default(0)
+  subtotal        Decimal  @db.Decimal(14, 2) @default(0)
+  discountTotal   Decimal  @db.Decimal(14, 2) @default(0)
+  taxTotal        Decimal  @db.Decimal(14, 2) @default(0)
+  grandTotal      Decimal  @db.Decimal(14, 2) @default(0)
+  costTotal       Decimal  @db.Decimal(14, 2) @default(0)
+  /// JSON map of PaymentMethod → amount string.
+  paymentsByMethod Json    @default("{}")
+  /// JSON array of 24 hourly grandTotal strings (business hours 0–23).
+  salesByHour     Json     @default("[]")
+  rebuiltAt       DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([businessDate])
+}
+
+/// Per-product daily sales rollup for top products / ABC / turnover.
+model DailyProductSales {
+  id           String  @id @default(cuid())
+  businessDate String
+  productId    String
+  product      Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity     Decimal @db.Decimal(18, 4) @default(0)
+  revenue      Decimal @db.Decimal(14, 2) @default(0)
+  cost         Decimal @db.Decimal(14, 2) @default(0)
+  lineCount    Int     @default(0)
+  rebuiltAt    DateTime @default(now())
+
+  @@unique([businessDate, productId])
+  @@index([businessDate])
+  @@index([productId, businessDate])
+}
+
+// ─── Phase 9: sessions, offline sync conflicts ───────────────────────────────
+
+/// One row per issued access token (jti). Revoking sets revokedAt so JWT validate fails.
+model AuthSession {
+  id               String    @id @default(cuid())
+  /// JWT `jti` claim — unique.
+  jti              String    @unique
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userAgent        String?
+  ip               String?
+  createdAt        DateTime  @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  lastSeenAt       DateTime  @default(now())
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+}
+
+/// Offline sync items that could not be applied automatically (never silently dropped).
+model SyncConflict {
+  id              String    @id @default(cuid())
+  /// CHECKOUT | STOCK_COUNT | GOODS_RECEIPT | OTHER
+  kind            String
+  /// OPEN | RESOLVED | DISMISSED
+  status          String    @default("OPEN")
+  /// Client outbox UUID / clientSaleId / etc.
+  clientRef       String?
+  payload         Json
+  /// Machine code e.g. STOCK_NEGATIVE, IDEMPOTENCY_MISMATCH
+  errorCode       String?
+  errorMessage    String?
+  createdByUserId String?
+  resolvedByUserId String?
+  resolvedBy      User?     @relation("SyncConflictResolvedBy", fields: [resolvedByUserId], references: [id])
+  resolvedAt      DateTime?
+  resolutionNote  String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([kind, status])
+  @@index([clientRef])
 }

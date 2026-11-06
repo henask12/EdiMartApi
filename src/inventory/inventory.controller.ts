@@ -1,59 +1,53 @@
-import { Body, Controller, Get, Post, Query, Req } from "@nestjs/common";
-import { CASHIER_ROLE, OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
-import { Roles } from "../common/decorators/roles.decorator";
+import { Body, Controller, Get, Headers, Post, Query, Req } from "@nestjs/common";
+import { AdjustReason, PermissionKey } from "@prisma/client";
+import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { InventoryService } from "./inventory.service";
-import { IsOptional, IsString, MinLength } from "class-validator";
-
-class ReceiveDto {
-  @IsString()
-  productId!: string;
-
-  @IsString()
-  quantity!: string;
-
-  @IsString()
-  unitCost!: string;
-
-  @IsOptional()
-  @IsString()
-  notes?: string;
-}
+import { viewerFor } from "../permissions/access";
+import type { Actor } from "../permissions/permissions.service";
+import { IsArray, IsEnum, IsOptional, IsString, MinLength, ValidateNested } from "class-validator";
+import { Type } from "class-transformer";
 
 class AdjustDto {
-  @IsString()
-  productId!: string;
-
-  @IsString()
-  quantityDelta!: string;
-
-  @IsOptional()
-  @IsString()
-  notes?: string;
+  @IsString() productId!: string;
+  @IsString() quantityDelta!: string;
+  @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsString() locationId?: string;
+  @IsOptional() @IsEnum(AdjustReason) reasonCode?: AdjustReason;
 }
 
 class ReturnDto {
-  @IsString()
-  productId!: string;
-
-  @IsString()
-  quantity!: string;
-
-  @IsOptional()
-  @IsString()
-  notes?: string;
-
-  @IsOptional()
-  @IsString()
-  refSaleId?: string;
+  @IsString() productId!: string;
+  @IsString() quantity!: string;
+  @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsString() refSaleId?: string;
 }
 
-type Authed = { user: { userId: string } };
+class WriteOffDto {
+  @IsString() productId!: string;
+  @IsString() quantity!: string;
+  @IsEnum(AdjustReason) reasonCode!: AdjustReason;
+  @IsOptional() @IsString() locationId?: string;
+  @IsOptional() @IsString() notes?: string;
+}
+
+class QuarantineDto {
+  @IsString() productId!: string;
+  @IsString() quantity!: string;
+  @IsOptional() @IsString() fromLocationId?: string;
+  @IsOptional() @IsString() notes?: string;
+}
+
+class SnapshotDto {
+  @IsOptional() @IsString() date?: string;
+}
+
+type Authed = { user: Actor };
 
 @Controller("inventory")
 export class InventoryController {
   constructor(private readonly inventory: InventoryService) {}
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.STOCK_VIEW)
   @Get("expiry")
   listExpiry(
     @Query("status") status?: "expiring" | "expired" | "all",
@@ -65,34 +59,73 @@ export class InventoryController {
     });
   }
 
+  @RequirePermissions(PermissionKey.STOCK_HISTORY_VIEW)
   @Get("movements")
   listMovements(
+    @Req() req: Authed,
     @Query("productId") productId?: string,
     @Query("skip") skip?: string,
     @Query("take") take?: string,
   ) {
-    return this.inventory.listMovements({
-      productId,
-      skip: skip ? Number(skip) : undefined,
-      take: take ? Number(take) : undefined,
-    });
+    return this.inventory.listMovements(
+      {
+        productId,
+        skip: skip ? Number(skip) : undefined,
+        take: take ? Number(take) : undefined,
+      },
+      viewerFor(req.user).includeCost,
+    );
   }
 
-  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
-  @Post("receive")
-  receive(@Req() req: Authed, @Body() body: ReceiveDto) {
-    return this.inventory.receiveGoods(req.user.userId, body);
-  }
-
-  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.STOCK_ADJUST)
   @Post("adjust")
-  adjust(@Req() req: Authed, @Body() body: AdjustDto) {
-    return this.inventory.adjustStock(req.user.userId, body);
+  adjust(
+    @Req() req: Authed,
+    @Body() body: AdjustDto,
+    @Headers("x-approval-token") approvalToken?: string,
+  ) {
+    return this.inventory.adjustStock(req.user, body, approvalToken?.trim() || undefined);
   }
 
-  @Roles(OWNER_ROLE, CASHIER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.STOCK_ADJUST)
   @Post("return")
   returnToStock(@Req() req: Authed, @Body() body: ReturnDto) {
     return this.inventory.returnToStock(req.user.userId, body);
+  }
+
+  @RequirePermissions(PermissionKey.STOCK_WRITE_OFF)
+  @Post("write-off")
+  writeOff(@Req() req: Authed, @Body() body: WriteOffDto) {
+    return this.inventory.writeOff(req.user.userId, body);
+  }
+
+  @RequirePermissions(PermissionKey.STOCK_VIEW)
+  @Get("overview")
+  overview(@Req() req: Authed) {
+    return this.inventory.inventoryOverview(viewerFor(req.user).includeCost);
+  }
+
+  @RequirePermissions(PermissionKey.STOCK_VIEW)
+  @Get("lookup")
+  lookup(@Req() req: Authed, @Query("q") q: string) {
+    return this.inventory.stockLookup(q, viewerFor(req.user).includeCost);
+  }
+
+  @RequirePermissions(PermissionKey.STOCK_ADJUST)
+  @Post("quarantine")
+  quarantine(@Req() req: Authed, @Body() body: QuarantineDto) {
+    return this.inventory.moveToQuarantine(req.user.userId, body);
+  }
+
+  @RequirePermissions(PermissionKey.STOCK_VIEW)
+  @Get("replenishment")
+  replenishment() {
+    return this.inventory.replenishmentSuggestions();
+  }
+
+  @RequirePermissions(PermissionKey.STOCK_VIEW)
+  @Post("snapshot")
+  snapshot(@Body() body: SnapshotDto) {
+    return this.inventory.takeDailySnapshot(body?.date);
   }
 }

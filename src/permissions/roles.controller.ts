@@ -7,11 +7,13 @@ import {
   Patch,
   Post,
   Query,
+  Req,
 } from "@nestjs/common";
 import { PermissionKey } from "@prisma/client";
 import { IsArray, IsEnum, IsOptional, IsString, MinLength } from "class-validator";
 import { RequirePermissions } from "../common/decorators/permissions.decorator";
-import { PermissionsService } from "./permissions.service";
+import { GROUP_ORDER, PERMISSION_CATALOG } from "./permission-catalog";
+import { Actor, PermissionsService } from "./permissions.service";
 
 class CreateRoleDto {
   @IsString()
@@ -42,6 +44,8 @@ class UpdateRolePermissionsDto {
   permissions!: PermissionKey[];
 }
 
+type Authed = { user: Actor };
+
 @Controller("roles")
 export class RolesController {
   constructor(private readonly permissions: PermissionsService) {}
@@ -53,10 +57,17 @@ export class RolesController {
     return roles.map((r) => this.permissions.mapRole(r));
   }
 
+  /** Every permission with its group, plain-language description and sensitivity (for the matrix). */
+  @RequirePermissions(PermissionKey.ROLES_MANAGE)
+  @Get("permissions")
+  catalog() {
+    return { groups: GROUP_ORDER, permissions: PERMISSION_CATALOG };
+  }
+
   @RequirePermissions(PermissionKey.ROLES_MANAGE)
   @Post()
-  create(@Body() body: CreateRoleDto) {
-    return this.permissions.createRole(body.name, body.permissions);
+  create(@Req() req: Authed, @Body() body: CreateRoleDto) {
+    return this.permissions.createRole(req.user, body.name, body.permissions);
   }
 
   @RequirePermissions(PermissionKey.ROLES_MANAGE)
@@ -68,14 +79,18 @@ export class RolesController {
 
   @RequirePermissions(PermissionKey.ROLES_MANAGE)
   @Patch(":id")
-  update(@Param("id") id: string, @Body() body: UpdateRoleDto) {
-    return this.permissions.updateRole(id, body);
+  update(@Req() req: Authed, @Param("id") id: string, @Body() body: UpdateRoleDto) {
+    return this.permissions.updateRole(req.user, id, body);
   }
 
   @RequirePermissions(PermissionKey.ROLES_MANAGE)
   @Patch(":id/permissions")
-  updatePermissions(@Param("id") id: string, @Body() body: UpdateRolePermissionsDto) {
-    return this.permissions.updateRole(id, { permissions: body.permissions });
+  updatePermissions(
+    @Req() req: Authed,
+    @Param("id") id: string,
+    @Body() body: UpdateRolePermissionsDto,
+  ) {
+    return this.permissions.updateRole(req.user, id, { permissions: body.permissions });
   }
 
   @RequirePermissions(PermissionKey.ROLES_MANAGE)

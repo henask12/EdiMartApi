@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from "@nestjs/common";
-import { OWNER_ROLE, STORE_STAFF_ROLE } from "../common/role.constants";
 import { IsString, MinLength } from "class-validator";
-import { Roles } from "../common/decorators/roles.decorator";
+import { PermissionKey } from "@prisma/client";
+import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { CategoriesService } from "./categories.service";
 
 class CategoryDto {
@@ -16,29 +16,31 @@ type Authed = { user: { userId: string } };
 export class CategoriesController {
   constructor(private readonly categories: CategoriesService) {}
 
+  @RequirePermissions(PermissionKey.PRODUCTS_VIEW)
   @Get()
   list() {
     return this.categories.list();
   }
 
+  @RequirePermissions(PermissionKey.PRODUCTS_VIEW)
   @Get(":id")
   get(@Param("id") id: string) {
     return this.categories.get(id);
   }
 
-  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.CATEGORIES_MANAGE)
   @Post()
   create(@Req() req: Authed, @Body() body: CategoryDto) {
     return this.categories.create(req.user.userId, body.name);
   }
 
-  @Roles(OWNER_ROLE, STORE_STAFF_ROLE)
+  @RequirePermissions(PermissionKey.CATEGORIES_MANAGE)
   @Patch(":id")
   update(@Req() req: Authed, @Param("id") id: string, @Body() body: CategoryDto) {
     return this.categories.update(req.user.userId, id, body.name);
   }
 
-  @Roles(OWNER_ROLE)
+  @RequirePermissions(PermissionKey.CATEGORIES_MANAGE)
   @Delete(":id")
   remove(@Req() req: Authed, @Param("id") id: string) {
     return this.categories.remove(req.user.userId, id);

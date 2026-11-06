@@ -1,8 +1,8 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
-import { OWNER_ROLE } from "../common/role.constants";
 import { IsBoolean, IsEmail, IsString } from "class-validator";
-import { Roles } from "../common/decorators/roles.decorator";
 import { NotificationsService } from "./notifications.service";
+import { PermissionKey } from "@prisma/client";
+import { RequirePermissions } from "../common/decorators/permissions.decorator";
 
 class EmailDto {
   @IsEmail()
@@ -15,7 +15,7 @@ class ToggleDto {
 }
 
 @Controller("settings/notification-emails")
-@Roles(OWNER_ROLE)
+@RequirePermissions(PermissionKey.SETTINGS_EMAILS)
 export class NotificationsController {
   constructor(private readonly notifications: NotificationsService) {}
 

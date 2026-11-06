@@ -10,6 +10,8 @@ import { AuditService } from "../audit/audit.service";
 import { InventoryService } from "../inventory/inventory.service";
 import { productStockSnapshot } from "../common/stock.util";
 import { ExportService, type ExportColumn } from "../export/export.service";
+import { StorageService } from "../storage/storage.service";
+import { omit } from "../permissions/access";
 
 const toDecimal = (value: string | number) => new Prisma.Decimal(value);
 
@@ -35,18 +37,23 @@ const productInclude = {
   category: true,
   productType: true,
   inventoryItems: { include: { location: true } },
+  barcodes: true,
 } as const;
 
 type ProductWithRelations = Prisma.ProductGetPayload<{ include: typeof productInclude }>;
 
-type EnrichedProduct = Omit<ProductWithRelations, "sellingPrice" | "costPrice"> & {
+type EnrichedProduct = Omit<ProductWithRelations, "sellingPrice" | "costPrice" | "inventoryItems"> & {
+  inventoryItems: (Omit<ProductWithRelations["inventoryItems"][number], "averageCost"> & {
+    averageCost?: Prisma.Decimal;
+  })[];
   imageUrl: string | null;
   onHand: string;
   reserved: string;
   available: string;
   stockStatus: StockStatus;
   sellingPrice: string;
-  costPrice: string;
+  /** Only present for people allowed to see costs (REPORTS_VIEW_COST_PROFIT). */
+  costPrice?: string;
 };
 
 const normalizeStockStatus = (value?: string): StockStatus | undefined => {
@@ -66,6 +73,7 @@ export class CatalogService {
     private readonly audit: AuditService,
     private readonly inventory: InventoryService,
     private readonly exportService: ExportService,
+    private readonly storage: StorageService,
   ) {}
 
   private stockStatus(available: Prisma.Decimal, restockAt: number): StockStatus {
@@ -81,24 +89,28 @@ export class CatalogService {
   private async enrichProduct(
     product: ProductWithRelations,
     locationId: string,
+    includeCost: boolean,
   ): Promise<EnrichedProduct> {
     const { onHand, reserved, available } = await productStockSnapshot(
       this.prisma,
       product.id,
       locationId,
     );
-    const imageUrl = product.imagePath
-      ? `${(process.env.PUBLIC_API_URL ?? "http://127.0.0.1:4000").replace(/\/$/, "")}${product.imagePath}`
-      : null;
+    const imageUrl = await this.storage.publicUrl(product.imagePath);
     return {
-      ...product,
+      // the raw row carries costPrice; it is added back below only for people allowed to see it
+      ...omit(product, "costPrice"),
+      // the average cost of each stock row is as secret as the product's cost price
+      inventoryItems: includeCost
+        ? product.inventoryItems
+        : product.inventoryItems.map((item) => omit(item, "averageCost")),
       imageUrl,
       onHand: onHand.toString(),
       reserved: reserved.toString(),
       available: available.toString(),
       stockStatus: this.stockStatus(available, product.restockAt),
       sellingPrice: product.sellingPrice.toFixed(2),
-      costPrice: product.costPrice.toFixed(2),
+      ...(includeCost ? { costPrice: product.costPrice.toFixed(2) } : {}),
     };
   }
 
@@ -106,11 +118,17 @@ export class CatalogService {
     q?: string;
     categoryId?: string;
     productTypeId?: string;
+    /** When set, restrict to these product ids (from trgm search). */
+    ids?: string[];
   }): Prisma.ProductWhereInput {
     const where: Prisma.ProductWhereInput = { isActive: true };
-    if (params.q) {
+    if (params.ids) {
+      where.id = { in: params.ids };
+    } else if (params.q) {
       where.OR = [
         { name: { contains: params.q, mode: "insensitive" } },
+        { nameAm: { contains: params.q, mode: "insensitive" } },
+        { brand: { contains: params.q, mode: "insensitive" } },
         { sku: { contains: params.q, mode: "insensitive" } },
       ];
     }
@@ -123,17 +141,61 @@ export class CatalogService {
     return where;
   }
 
-  async listProducts(params: {
-    q?: string;
-    categoryId?: string;
-    productTypeId?: string;
-    stockStatus?: string;
-    skip?: number;
-    take?: number;
-  }) {
+  /**
+   * Prefer pg_trgm `%` / similarity when the extension is available; fall back to ILIKE.
+   * Returns null when q is empty; empty array when nothing matches.
+   */
+  private async searchProductIdsByTrgm(q: string): Promise<string[] | null> {
+    const term = q.trim();
+    if (!term) {
+      return null;
+    }
+    try {
+      const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+        SELECT p.id
+          FROM "Product" p
+         WHERE p."isActive" = true
+           AND (
+             p.name % ${term}
+             OR COALESCE(p."nameAm", '') % ${term}
+             OR COALESCE(p.brand, '') % ${term}
+             OR p.sku ILIKE ${"%" + term + "%"}
+             OR p.name ILIKE ${"%" + term + "%"}
+           )
+         ORDER BY GREATEST(
+           similarity(p.name, ${term}),
+           similarity(COALESCE(p."nameAm", ''), ${term}),
+           similarity(COALESCE(p.brand, ''), ${term})
+         ) DESC,
+         p.name ASC
+         LIMIT 500`;
+      return rows.map((r) => r.id);
+    } catch {
+      return null;
+    }
+  }
+
+  async listProducts(
+    params: {
+      q?: string;
+      categoryId?: string;
+      productTypeId?: string;
+      stockStatus?: string;
+      skip?: number;
+      take?: number;
+    },
+    includeCost = false,
+  ) {
     const take = Math.min(params.take ?? 100, 200);
     const skip = params.skip ?? 0;
-    const where = this.buildWhere(params);
+    let ids: string[] | undefined;
+    if (params.q?.trim()) {
+      const trgmIds = await this.searchProductIdsByTrgm(params.q);
+      if (trgmIds) {
+        ids = trgmIds;
+      }
+    }
+    const where = this.buildWhere({ ...params, ids });
     const defaultLoc = await this.locations.getDefault();
     const stockFilter = normalizeStockStatus(params.stockStatus);
 
@@ -143,11 +205,31 @@ export class CatalogService {
         orderBy: { name: "asc" },
         include: productInclude,
       });
-      const enriched = await Promise.all(raw.map((p) => this.enrichProduct(p, defaultLoc.id)));
+      const enriched = await Promise.all(
+        raw.map((p) => this.enrichProduct(p, defaultLoc.id, includeCost)),
+      );
       const filtered = enriched.filter((p) => p.stockStatus === stockFilter);
       const total = filtered.length;
       const items = filtered.slice(skip, skip + take);
       return { items, total, skip, take };
+    }
+
+    // Preserve trgm relevance order when we have ids from similarity search.
+    if (ids) {
+      if (ids.length === 0) {
+        return { items: [], total: 0, skip, take };
+      }
+      const pageIds = ids.slice(skip, skip + take);
+      const raw = await this.prisma.product.findMany({
+        where: { ...where, id: { in: pageIds } },
+        include: productInclude,
+      });
+      const byId = new Map(raw.map((p) => [p.id, p]));
+      const ordered = pageIds.map((id) => byId.get(id)).filter(Boolean) as ProductWithRelations[];
+      const items = await Promise.all(
+        ordered.map((p) => this.enrichProduct(p, defaultLoc.id, includeCost)),
+      );
+      return { items, total: ids.length, skip, take };
     }
 
     const [raw, total] = await Promise.all([
@@ -161,7 +243,7 @@ export class CatalogService {
       this.prisma.product.count({ where }),
     ]);
     const items = await Promise.all(
-      raw.map((p) => this.enrichProduct(p, defaultLoc.id)),
+      raw.map((p) => this.enrichProduct(p, defaultLoc.id, includeCost)),
     );
     return { items, total, skip, take };
   }
@@ -174,12 +256,16 @@ export class CatalogService {
       productTypeId?: string;
       stockStatus?: string;
     },
+    includeCost = false,
   ) {
-    const { items } = await this.listProducts({
-      ...params,
-      skip: 0,
-      take: 10000,
-    });
+    const { items } = await this.listProducts(
+      {
+        ...params,
+        skip: 0,
+        take: 10000,
+      },
+      includeCost,
+    );
     const columns: ExportColumn[] = [
       { header: "SKU", key: "sku" },
       { header: "Name", key: "name" },
@@ -188,7 +274,7 @@ export class CatalogService {
       { header: "On hand", key: "onHand" },
       { header: "Available", key: "available" },
       { header: "Status", key: "status" },
-      { header: "Cost", key: "cost" },
+      ...(includeCost ? [{ header: "Cost", key: "cost" }] : []),
       { header: "Price", key: "price" },
     ];
     const rows = items.map((p) => ({
@@ -199,13 +285,13 @@ export class CatalogService {
       onHand: p.onHand,
       available: p.available,
       status: p.stockStatus,
-      cost: p.costPrice,
+      ...(includeCost ? { cost: p.costPrice } : {}),
       price: p.sellingPrice,
     }));
     return this.exportService.build(format, `products-${Date.now()}`, columns, rows);
   }
 
-  async getProduct(id: string): Promise<EnrichedProduct> {
+  async getProduct(id: string, includeCost = false): Promise<EnrichedProduct> {
     const product = await this.prisma.product.findUnique({
       where: { id },
       include: productInclude,
@@ -214,19 +300,26 @@ export class CatalogService {
       throw new NotFoundException("Product not found");
     }
     const defaultLoc = await this.locations.getDefault();
-    return this.enrichProduct(product, defaultLoc.id);
+    return this.enrichProduct(product, defaultLoc.id, includeCost);
   }
 
   async createProduct(
     userId: string,
     data: {
       name: string;
+      nameAm?: string;
+      brand?: string;
       categoryId: string;
       productTypeId?: string;
       sellingPrice: string;
       costPrice?: string;
       restockAt?: number;
       restockQty?: number;
+      minStock?: number;
+      maxStock?: number;
+      leadTimeDays?: number;
+      trackBatches?: boolean;
+      barcode?: string;
       imagePath?: string;
       description?: string;
       originCountry?: string;
@@ -234,6 +327,7 @@ export class CatalogService {
       initialExpiryDate?: string;
       expiryDate?: string;
     },
+    includeCost = false,
   ) {
     const name = data.name.trim();
     if (!name) {
@@ -263,6 +357,8 @@ export class CatalogService {
       const createData: Prisma.ProductUncheckedCreateInput = {
         sku: autoSku(name),
         name,
+        nameAm: data.nameAm?.trim() || null,
+        brand: data.brand?.trim() || null,
         categoryId: data.categoryId,
         productTypeId: data.productTypeId ?? null,
         imagePath: data.imagePath,
@@ -272,6 +368,10 @@ export class CatalogService {
         costPrice: cost,
         restockAt: data.restockAt ?? 0,
         restockQty: data.restockQty ?? 0,
+        minStock: data.minStock ?? 0,
+        maxStock: data.maxStock ?? 0,
+        leadTimeDays: data.leadTimeDays ?? 0,
+        trackBatches: data.trackBatches ?? Boolean(data.expiryDate),
         expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
       };
       const created = await tx.product.create({ data: createData });
@@ -283,6 +383,17 @@ export class CatalogService {
           averageCost: cost,
         },
       });
+      const barcode = data.barcode?.trim();
+      if (barcode) {
+        await tx.productBarcode.create({
+          data: {
+            productId: created.id,
+            barcode,
+            kind: "INTERNAL",
+            isPrimary: true,
+          },
+        });
+      }
       return created;
     });
     await this.audit.log(userId, "CREATE", "Product", product.id, { name });
@@ -298,7 +409,7 @@ export class CatalogService {
       });
     }
 
-    return this.getProduct(product.id);
+    return this.getProduct(product.id, includeCost);
   }
 
   async updateProduct(
@@ -306,18 +417,26 @@ export class CatalogService {
     id: string,
     data: Partial<{
       name: string;
+      nameAm: string | null;
+      brand: string | null;
       categoryId: string;
       productTypeId: string | null;
       sellingPrice: string;
       costPrice: string;
       restockAt: number;
       restockQty: number;
+      minStock: number;
+      maxStock: number;
+      leadTimeDays: number;
+      trackBatches: boolean;
+      barcode: string;
       isActive: boolean;
       imagePath: string;
       description: string | null;
       originCountry: string | null;
       expiryDate: string | null;
     }>,
+    includeCost = false,
   ) {
     const existing = await this.ensureProduct(id);
     if (data.productTypeId) {
@@ -348,6 +467,8 @@ export class CatalogService {
     }
     const updateData: Prisma.ProductUncheckedUpdateInput = {
       name: data.name?.trim(),
+      nameAm: optionalTrimmedString(data.nameAm),
+      brand: optionalTrimmedString(data.brand),
       categoryId: data.categoryId,
       productTypeId:
         data.productTypeId !== undefined ? data.productTypeId : undefined,
@@ -359,6 +480,10 @@ export class CatalogService {
       costPrice: data.costPrice !== undefined ? toDecimal(data.costPrice) : undefined,
       restockAt: data.restockAt,
       restockQty: data.restockQty,
+      minStock: data.minStock,
+      maxStock: data.maxStock,
+      leadTimeDays: data.leadTimeDays,
+      trackBatches: data.trackBatches,
       isActive: data.isActive,
       expiryDate:
         data.expiryDate !== undefined
@@ -367,12 +492,27 @@ export class CatalogService {
             : null
           : undefined,
     };
-    await this.prisma.product.update({
-      where: { id },
-      data: updateData,
+    await this.prisma.$transaction(async (tx) => {
+      await tx.product.update({ where: { id }, data: updateData });
+      const barcode = data.barcode?.trim();
+      if (barcode) {
+        const existingPrimary = await tx.productBarcode.findFirst({
+          where: { productId: id, isPrimary: true },
+        });
+        if (existingPrimary) {
+          await tx.productBarcode.update({
+            where: { id: existingPrimary.id },
+            data: { barcode },
+          });
+        } else {
+          await tx.productBarcode.create({
+            data: { productId: id, barcode, kind: "INTERNAL", isPrimary: true },
+          });
+        }
+      }
     });
     await this.audit.log(userId, "UPDATE", "Product", id, { name: data.name });
-    return this.getProduct(id);
+    return this.getProduct(id, includeCost);
   }
 
   private async ensureProduct(id: string) {

@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "phase-*"]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Prisma generate
+        run: node node_modules/prisma/build/index.js generate
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Migration status (schema drift)
+        run: |
+          # Embedded Postgres is started by Jest; here we only ensure migrate status CLI works
+          # against a throwaway URL by relying on the test suite's migrate deploy path.
+          # Fail fast if migration folder is empty or prisma cannot load schema.
+          test -d prisma/migrations
+          node node_modules/prisma/build/index.js validate
+      - name: Test
+        run: npm test -- --forceExit
+        env:
+          JWT_SECRET: ci-test-secret-at-least-32-chars-long
+          WEB_ORIGIN: http://localhost:3000
