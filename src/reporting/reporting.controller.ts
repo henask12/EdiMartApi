@@ -47,6 +47,10 @@ class DashboardQueryDto {
 class RangeQueryDto {
   @IsOptional()
   @IsString()
+  preset?: string;
+
+  @IsOptional()
+  @IsString()
   from?: string;
 
   @IsOptional()
@@ -67,6 +71,18 @@ class SalesByProductQueryDto extends RangeQueryDto {
 class StockOnHandQueryDto {
   @IsOptional()
   @IsString()
+  preset?: string;
+
+  @IsOptional()
+  @IsString()
+  from?: string;
+
+  @IsOptional()
+  @IsString()
+  to?: string;
+
+  @IsOptional()
+  @IsString()
   locationId?: string;
 
   @IsOptional()
@@ -79,6 +95,18 @@ class StockOnHandQueryDto {
 }
 
 class ValuationQueryDto {
+  @IsOptional()
+  @IsString()
+  preset?: string;
+
+  @IsOptional()
+  @IsString()
+  from?: string;
+
+  @IsOptional()
+  @IsString()
+  to?: string;
+
   @IsOptional()
   @IsString()
   asOf?: string;
@@ -123,6 +151,18 @@ class AbcQueryDto extends RangeQueryDto {
 
 class DeadStockQueryDto {
   @IsOptional()
+  @IsString()
+  preset?: string;
+
+  @IsOptional()
+  @IsString()
+  from?: string;
+
+  @IsOptional()
+  @IsString()
+  to?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   days?: number;
@@ -133,6 +173,18 @@ class DeadStockQueryDto {
 }
 
 class OverstockQueryDto {
+  @IsOptional()
+  @IsString()
+  preset?: string;
+
+  @IsOptional()
+  @IsString()
+  from?: string;
+
+  @IsOptional()
+  @IsString()
+  to?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

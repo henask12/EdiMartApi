@@ -33,7 +33,7 @@ export const SETTING_DEFAULTS = {
   "pos.scannerBeep": "true",
   "pos.favourites": "[]",
   "pos.paymentMethods": DEFAULT_POS_PAYMENT_METHODS,
-  "pos.cashDenominations": "[50,100,200,500,1000]",
+  "pos.cashDenominations": "[1,5,10,50,100,200]",
   "pos.labelAsTaxInvoice": "false",
   "shifts.requireOpenShift": "true",
   "shifts.varianceApprovalThreshold": "100",
@@ -117,6 +117,10 @@ export class StoreSettingsService {
       if (row.key in SETTING_DEFAULTS && typeof row.value === "string") {
         result[row.key] = row.value;
       }
+    }
+    // Migrate placeholder list that included non-circulating 500/1000 notes.
+    if (result["pos.cashDenominations"] === "[50,100,200,500,1000]") {
+      result["pos.cashDenominations"] = SETTING_DEFAULTS["pos.cashDenominations"];
     }
     return result as Record<SettingKey, string>;
   }

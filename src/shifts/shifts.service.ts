@@ -590,11 +590,19 @@ export class ShiftsService {
       throw new BadRequestException("denominations must be an object of denomination → quantity");
     }
     const settings = await this.settings.getAll();
-    let allowed: number[] = [50, 100, 200, 500, 1000];
+    const defaultAllowed = [1, 5, 10, 50, 100, 200];
+    const legacyAllowed = [50, 100, 200, 500, 1000];
+    let allowed: number[] = defaultAllowed;
     try {
       const parsed = JSON.parse(settings["pos.cashDenominations"] || "[]");
       if (Array.isArray(parsed) && parsed.length) {
-        allowed = parsed.map((n: unknown) => Number(n)).filter((n) => Number.isFinite(n) && n > 0);
+        const next = parsed
+          .map((n: unknown) => Number(n))
+          .filter((n) => Number.isFinite(n) && n > 0);
+        const isLegacy =
+          next.length === legacyAllowed.length &&
+          next.every((n, i) => n === legacyAllowed[i]);
+        allowed = isLegacy || next.length === 0 ? defaultAllowed : next;
       }
     } catch {
       /* keep defaults */
