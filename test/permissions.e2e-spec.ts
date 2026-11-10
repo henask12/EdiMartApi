@@ -150,7 +150,6 @@ const RULES: Rule[] = [
   { method: "post", path: "/settings/notification-emails", all: [K.SETTINGS_EMAILS] },
   { method: "patch", path: "/settings/notification-emails/some-id", all: [K.SETTINGS_EMAILS] },
   { method: "delete", path: "/settings/notification-emails/some-id", all: [K.SETTINGS_EMAILS] },
-  { method: "get", path: "/settings/store", all: [K.SETTINGS_MANAGE] },
   { method: "patch", path: "/settings/store", all: [K.SETTINGS_MANAGE] },
   { method: "post", path: "/registers", all: [K.SETTINGS_MANAGE] },
   { method: "patch", path: "/registers/some-id", all: [K.SETTINGS_MANAGE] },
@@ -269,6 +268,8 @@ const ANY_SIGNED_IN: Pick<Rule, "method" | "path">[] = [
   { method: "get", path: "/locations" },
   { method: "get", path: "/locations/some-id" },
   { method: "get", path: "/registers" },
+  // Till needs VAT / denominations / shift rules without SETTINGS_MANAGE.
+  { method: "get", path: "/settings/store" },
 ];
 
 describe("one permission model", () => {

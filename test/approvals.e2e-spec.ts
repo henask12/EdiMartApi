@@ -288,7 +288,9 @@ describe("manager PIN approvals", () => {
           .set(bearer(staff.token))
           .send({ productId: product.id, quantityDelta: delta });
 
-      expect((await request(t.http()).get("/settings/store").set(bearer(staff.token))).status).toBe(403);
+      // GET is any authenticated user (POS needs VAT / till rules); PATCH stays SETTINGS_MANAGE.
+      expect((await request(t.http()).get("/settings/store").set(bearer(staff.token))).status).toBe(200);
+      expect((await request(t.http()).patch("/settings/store").set(bearer(staff.token)).send({})).status).toBe(403);
       const before = await request(t.http()).get("/settings/store").set(bearer(ownerToken));
       expect(before.body["inventory.adjustmentApprovalThreshold"]).toBe("5000");
 
