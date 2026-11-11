@@ -489,7 +489,7 @@ export class ShiftsService {
    */
   async resolveShiftForCheckout(actor: Actor, registerId?: string): Promise<string | null> {
     const all = await this.settings.getAll();
-    const required = (all["shifts.requireOpenShift"] || "true").toLowerCase() === "true";
+    const required = (all["shifts.requireOpenShift"] || "false").toLowerCase() === "true";
     if (!required) {
       // Still attach an open shift when one exists, without blocking.
       const optional = await this.findOpenShiftForActor(actor.userId, registerId);

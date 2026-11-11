@@ -35,7 +35,7 @@ export const SETTING_DEFAULTS = {
   "pos.paymentMethods": DEFAULT_POS_PAYMENT_METHODS,
   "pos.cashDenominations": "[1,5,10,50,100,200]",
   "pos.labelAsTaxInvoice": "false",
-  "shifts.requireOpenShift": "true",
+  "shifts.requireOpenShift": "false",
   "shifts.varianceApprovalThreshold": "100",
   "shifts.eodEmailEnabled": "true",
   /** PO subtotal (Birr) above this needs PURCHASE_APPROVE (or owner). */
@@ -122,6 +122,24 @@ export class StoreSettingsService {
     if (result["pos.cashDenominations"] === "[50,100,200,500,1000]") {
       result["pos.cashDenominations"] = SETTING_DEFAULTS["pos.cashDenominations"];
     }
+
+    // One-shot ops flip: Phase 5 defaulted require-open-shift on. Single-staff shops
+    // leave it off; the owner can turn it back on in Settings → POS after this runs once.
+    const optionalShiftResetKey = "shifts._optionalShiftReset_v1";
+    if (!rows.some((row) => row.key === optionalShiftResetKey)) {
+      await this.prisma.storeSetting.upsert({
+        where: { key: "shifts.requireOpenShift" },
+        update: { value: "false" },
+        create: { key: "shifts.requireOpenShift", value: "false" },
+      });
+      await this.prisma.storeSetting.upsert({
+        where: { key: optionalShiftResetKey },
+        update: { value: "1" },
+        create: { key: optionalShiftResetKey, value: "1" },
+      });
+      result["shifts.requireOpenShift"] = "false";
+    }
+
     return result as Record<SettingKey, string>;
   }
 

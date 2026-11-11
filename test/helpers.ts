@@ -63,7 +63,7 @@ export const seedBasics = async (prisma: PrismaClient) => {
       isActive: true,
     },
   });
-  // Phase 5 default is requireOpenShift=true; keep checkout suites independent unless a test opts in.
+  // Default is requireOpenShift=false; pin explicitly so checkout suites stay independent of seed/settings.
   await prisma.storeSetting.create({
     data: { key: "shifts.requireOpenShift", value: "false" },
   });
